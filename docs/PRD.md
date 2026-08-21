@@ -20,6 +20,7 @@ Monical does not run experiments, collect data, or apply corrections automatical
 - **PsychoPy** (required) — stimulus rendering, frame timing, window management. Every vision science lab using Python already has this.
 - **psychopy_visionscience** (optional, guarded import) — needed only for the radial checkerboard stimulus. All other modes work without it. Failure reported on the info screen with the pip install command.
 - **NumPy** (comes with PsychoPy)
+- **argparse** (stdlib) — used for the `--image` flag only.
 - No other dependencies.
 
 ---
@@ -170,7 +171,15 @@ ImageStim(win=win, image=filepath, size=size,
           pos=(x, y), autoLog=False)
 ```
 
-**File selection:** On the intro screen, when the user presses `[5]`, open a file dialog (`psychopy.gui.fileOpenDlg` or tkinter fallback) to select a `.png` file. Store the path. If no file is selected, fall back to a 256×256 checkerboard test pattern generated with NumPy.
+**File selection:** Pass the image path as a command-line argument:
+
+```
+python monical.py --image path/to/texture.png
+```
+
+If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §10.
+
+The path is stored in state and written to snapshots for reproducibility. If the file doesn't exist at runtime, print an error and fall back to the generated pattern.
 
 **Stimulus-specific parameters:**
 
@@ -338,6 +347,7 @@ Press SPACE to begin.
 - Not a monitor profiler. It doesn't build or apply gamma tables — PsychoPy Monitor Center does that. Monical helps you collect the measurements.
 - Not automatic. No photodiode input, no closed-loop correction. You read the photometer, you adjust the knob.
 - No GUI widgets. Keyboard + on-screen text only.
+- No mouse. No file dialogs. Image files are passed via command-line arguments.
 
 ---
 
