@@ -33,6 +33,12 @@ Single-file script: `monical.py`. No submodules, no config files, no build step.
 python monical.py
 ```
 
+With a custom PNG texture for stimulus type `[5]` (see §4.5):
+
+```
+python monical.py --image assets/texture.png
+```
+
 ### 3.1 Screen flow
 
 ```
@@ -174,7 +180,7 @@ ImageStim(win=win, image=filepath, size=size,
 **File selection:** Pass the image path as a command-line argument:
 
 ```
-python monical.py --image path/to/texture.png
+python monical.py --image assets/texture.png
 ```
 
 If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §10.
