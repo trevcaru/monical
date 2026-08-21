@@ -111,17 +111,45 @@ MODE_FLICKER_15 = 'flicker_15hz'
 MODE_FLICKER_20 = 'flicker_20hz'
 MODE_FLICKER_CUSTOM = 'flicker_custom'
 MODE_GAMMA = 'gamma_steps'
-MODE_DUAL = 'dual_stimulus'
 MODE_UNIFORMITY = 'spatial_uniformity'
+
+# Runtime mode keys (PRD 6). [6] is unassigned in the PRD's own table.
+# Dual stimulus [7] is NOT here: see DUAL note below.
+MODE_KEYS = {
+    '1': MODE_STATIC_ON,
+    '2': MODE_STATIC_OFF,
+    '3': MODE_FLICKER_15,
+    '4': MODE_FLICKER_20,
+    '5': MODE_FLICKER_CUSTOM,
+    'g': MODE_GAMMA,
+    '8': MODE_UNIFORMITY,
+}
+
+FLICKER_HZ = {MODE_FLICKER_15: 15, MODE_FLICKER_20: 20}
+
+# [7] toggles dual rendering, which is a flag rather than a mode because
+# PRD 6.3 says both copies "flicker at the same frequency IF IN A FLICKER
+# MODE" -- that only has meaning while a flicker mode is still selected, so
+# dual has to compose with the mode rather than replace it.
+DUAL_KEY = '7'
 
 # PRD 6.2 -- 11 levels in PsychoPy rgb units, index 5 is mid-gray.
 GAMMA_LEVELS = [-1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
 
-# PRD 6.4 -- center first, then the eight surround positions.
+# PRD 6.4 -- center first, then the eight surround positions. This is the
+# order the PRD enumerates; LAYOUT is the same nine names placed on the 3x3
+# so the arrow keys can walk rows and columns.
 UNIFORMITY_GRID = [
     'center', 'top_left', 'top_center', 'top_right',
     'mid_left', 'mid_right', 'bottom_left', 'bottom_center', 'bottom_right',
 ]
+UNIFORMITY_LAYOUT = [
+    ['top_left', 'top_center', 'top_right'],
+    ['mid_left', 'center', 'mid_right'],
+    ['bottom_left', 'bottom_center', 'bottom_right'],
+]
+
+FLASH_FRAMES = 60                 # how long the snapshot confirmation shows
 
 
 # -----------------------------------------------------------------------------
@@ -249,6 +277,69 @@ def clamp(value, low, high):
     return max(low, min(high, value))
 
 
+def hz_to_frames(hz, refresh_hz):
+    """Nearest integer frame count for a requested Hz at the measured rate."""
+    return max(2, int(round(refresh_hz / float(hz))))
+
+
+def frames_to_hz(frames, refresh_hz):
+    """Realised Hz. Never a rounded literal -- always derived from frames."""
+    return refresh_hz / float(frames)
+
+
+def uniformity_rc(name):
+    """(row, col) of a grid position name in the 3x3 layout."""
+    for row, names in enumerate(UNIFORMITY_LAYOUT):
+        if name in names:
+            return row, names.index(name)
+    return 1, 1
+
+
+def uniformity_xy(name, aspect, size):
+    """Centre of the uniformity patch at grid position `name`, in height units.
+
+    Pushed as far into each corner as the patch fits without clipping, since
+    the point of the mode is to characterise the panel edges.
+    """
+    row, col = uniformity_rc(name)
+    x_extent = max(0.0, aspect / 2.0 - size / 2.0)
+    y_extent = max(0.0, 0.5 - size / 2.0)
+    return (round((col - 1) * x_extent, STORE_DP),
+            round((1 - row) * y_extent, STORE_DP))
+
+
+def move_uniformity(state, key):
+    """Walk the 3x3 grid with the arrow keys (PRD 6.4). True if it moved."""
+    row, col = uniformity_rc(UNIFORMITY_GRID[state['uniformity_grid_index']])
+    if key == 'left':
+        col -= 1
+    elif key == 'right':
+        col += 1
+    elif key == 'up':
+        row -= 1
+    elif key == 'down':
+        row += 1
+    else:
+        return False
+    name = UNIFORMITY_LAYOUT[int(clamp(row, 0, 2))][int(clamp(col, 0, 2))]
+    state['uniformity_grid_index'] = UNIFORMITY_GRID.index(name)
+    return True
+
+
+def mode_frames(state, refresh_hz):
+    """Frames per flicker cycle for the active mode, or None if not flickering.
+
+    PRD 6.1: the count is the nearest integer at the MEASURED refresh, and the
+    readout reports the frequency that count actually realises.
+    """
+    mode = state['mode']
+    if mode in FLICKER_HZ:
+        return hz_to_frames(FLICKER_HZ[mode], refresh_hz)
+    if mode == MODE_FLICKER_CUSTOM:
+        return hz_to_frames(state['custom_freq_hz'], refresh_hz)
+    return None
+
+
 def knob_table(stimulus_type):
     """Universal knobs plus the chosen type's own. Built once per session."""
     table = dict(KNOBS)
@@ -303,6 +394,11 @@ def default_state(stimulus_type):
         # Selection
         'stimulus_type': stimulus_type,
         'mode': MODE_STATIC_ON,
+        'dual': False,            # PRD 6.3, orthogonal to mode
+
+        # Screen width / height, filled in once the window is open. Needed for
+        # the full-screen gamma patch and the uniformity grid extents.
+        'aspect': 16.0 / 9.0,
 
         # Grating / Gabor (PRD 4.2, 4.3)
         'sf': 4.0,
@@ -403,15 +499,35 @@ def monitor_height_cm(mon, resolution):
 
 
 def visual_angle_deg(height_units, screen_height_cm, distance_cm):
-    """Degrees subtended by an extent given in 'height' units.
+    """Degrees subtended by an EXTENT given in 'height' units (PRD 7).
 
     In height units 1.0 spans the full screen height, so size_cm is just
-    height_units * screen_height_cm.
+    height_units * screen_height_cm. The factor of 2 is right here because an
+    extent centred on the line of sight straddles it: half falls either side.
     """
     if not screen_height_cm or not distance_cm:
         return None
     size_cm = abs(float(height_units)) * float(screen_height_cm)
     return 2.0 * np.degrees(np.arctan(size_cm / (2.0 * float(distance_cm))))
+
+
+def eccentricity_deg(offset_units, screen_height_cm, distance_cm):
+    """Degrees from fixation to an OFF-AXIS point, in 'height' units.
+
+    Deliberately NOT visual_angle_deg. That formula halves the extent and
+    doubles the resulting angle, which is only correct when the thing measured
+    straddles the line of sight. A displacement does not: the whole offset
+    falls on one side, so it subtends atan(x / d) with no factor of 2.
+
+    The two disagree by more than rounding. At x = 0.66 on a 33 cm-tall panel
+    at 40 cm, the extent form gives 30.46 deg against the correct 28.57, and
+    the overstatement grows with eccentricity -- which matters here, because
+    eccentricity is exactly what a peripheral-stimulus experiment reports.
+    """
+    if not screen_height_cm or not distance_cm:
+        return None
+    offset_cm = abs(float(offset_units)) * float(screen_height_cm)
+    return np.degrees(np.arctan(offset_cm / float(distance_cm)))
 
 
 # =============================================================================
@@ -522,6 +638,9 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label):
     lines += [""] + WORKFLOWS[selected]
     lines += [
         "",
+        "MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz",
+        "       [5] custom Hz  [G] gamma steps  [8] spatial uniformity",
+        "       [7] toggles DUAL (two copies at +/-X, same flicker)",
         "[S] snapshot   [Q] quit (saves final state)",
         "",
         "Press SPACE to begin.",
@@ -574,22 +693,37 @@ def show_intro(win, resolution, refresh_hz, image_label):
 # HUD  (PRD 8, precision per PRD 5.2)
 # =============================================================================
 
-def hz_to_frames(hz, refresh_hz):
-    """Nearest integer frame count for a requested Hz at the measured rate."""
-    return max(2, int(round(refresh_hz / float(hz))))
-
-
-def frames_to_hz(frames, refresh_hz):
-    """Realised Hz. Never a rounded literal -- always derived from frames."""
-    return refresh_hz / float(frames)
-
-
 def _deg(value):
     return '--' if value is None else '{:.2f}'.format(value)
 
 
+def mode_line(state):
+    """HUD line 2. Mode, dual flag, and whatever the mode itself owns."""
+    mode = state['mode']
+    parts = ['Mode: {}'.format(mode)]
+    if mode == MODE_GAMMA:
+        index = state['gamma_step_index']
+        level = GAMMA_LEVELS[index]
+        parts.append('Level {}/{}: {:+.1f} rgb ({} 8-bit)'.format(
+            index + 1, len(GAMMA_LEVELS), level,
+            int(round(255 * (level + 1.0) / 2.0))))
+    elif mode == MODE_UNIFORMITY:
+        name = UNIFORMITY_GRID[state['uniformity_grid_index']]
+        grid_x, grid_y = uniformity_xy(name, state['aspect'], state['size'])
+        parts.append('Cell: {} ({:.2f}, {:.2f})'.format(name, grid_x, grid_y))
+    else:
+        parts.append('Stim: {}'.format(state['stimulus_type']))
+    if state['dual']:
+        parts.append('DUAL +/-X')
+    return ' | '.join(parts)
+
+
 def stim_line(state):
     """HUD line 5. Adapts to the stimulus type (PRD 8)."""
+    if state['mode'] == MODE_GAMMA:
+        return 'Gamma steps: LEFT/RIGHT to change level | fixation hidden'
+    if state['mode'] == MODE_UNIFORMITY:
+        return 'Spatial uniformity: ARROWS move the patch across the 3x3 grid'
     stim_type = state['stimulus_type']
     if stim_type in (STIM_GABOR, STIM_GRATING):
         line = 'SF: {:.2f} c/unit | Ori: {:.1f} deg | Phase: {:.2f}'.format(
@@ -613,21 +747,32 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm):
     """The five lines of PRD 8, rebuilt every frame."""
     size_deg = visual_angle_deg(state['size'], screen_height_cm,
                                 state['viewing_distance_cm'])
-    ecc_deg = visual_angle_deg(state['x_pos'], screen_height_cm,
+    ecc_deg = eccentricity_deg(state['x_pos'], screen_height_cm,
                                state['viewing_distance_cm'])
-    frames = hz_to_frames(state['custom_freq_hz'], refresh_hz)
+
+    # While flickering, report what the active mode realises. Otherwise report
+    # what the standing custom setting WOULD realise, marked idle so nobody
+    # reads it as a live measurement.
+    frames = mode_frames(state, refresh_hz)
+    if frames is None:
+        idle = hz_to_frames(state['custom_freq_hz'], refresh_hz)
+        freq_text = 'Freq: {:.3f} Hz ({} frames, idle)'.format(
+            frames_to_hz(idle, refresh_hz), idle)
+    else:
+        freq_text = 'Freq: {:.3f} Hz ({} frames, {} on / {} off)'.format(
+            frames_to_hz(frames, refresh_hz), frames,
+            frames // 2, frames - frames // 2)
 
     return '\n'.join([
         '{}x{} | {:.2f} Hz | PsychoPy {} | Dist: {} cm'.format(
             resolution[0], resolution[1], live_hz, PSYCHOPY_VERSION,
             state['viewing_distance_cm']),
-        'Mode: {} | Stim: {}'.format(state['mode'], state['stimulus_type']),
+        mode_line(state),
         'X: {:.2f} | Y: {:.2f} | Size: {:.2f} ({} deg) | Ecc: {} deg'.format(
             state['x_pos'], state['y_pos'], state['size'],
             _deg(size_deg), _deg(ecc_deg)),
-        'BG: {:.3f} | Contrast: {:.3f} | Freq: {:.3f} Hz ({} frames)'.format(
-            state['bg_gray'], state['contrast'],
-            frames_to_hz(frames, refresh_hz), frames),
+        'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
+            state['bg_gray'], state['contrast'], freq_text),
         stim_line(state),
     ])
 
@@ -671,20 +816,37 @@ def stimulus_specific(state):
     # screen it was taken from.
     if state['mode'] == MODE_GAMMA:
         record['gamma_level'] = GAMMA_LEVELS[state['gamma_step_index']]
+        record['gamma_step_index'] = state['gamma_step_index']
     elif state['mode'] == MODE_UNIFORMITY:
-        record['grid_position'] = UNIFORMITY_GRID[
-            state['uniformity_grid_index']]
+        name = UNIFORMITY_GRID[state['uniformity_grid_index']]
+        grid_x, grid_y = uniformity_xy(name, state['aspect'], state['size'])
+        record['grid_position'] = name
+        record['grid_x'] = grid_x
+        record['grid_y'] = grid_y
+        # PRD 6.4 draws the uniform patch whatever the session's stimulus
+        # type is, so its colour has to be recorded even for, say, a Gabor
+        # session -- otherwise the snapshot does not describe what the
+        # photometer was actually pointed at.
+        if stim_type != STIM_UNIFORM:
+            record['patch_r'] = round(state['r'], STORE_DP)
+            record['patch_g'] = round(state['g'], STORE_DP)
+            record['patch_b'] = round(state['b'], STORE_DP)
+            record['patch_alpha'] = round(state['alpha'], STORE_DP)
 
     return record
 
 
-def state_record(state, screen_height_cm):
+def state_record(state, screen_height_cm, refresh_hz=None):
     angle = visual_angle_deg(state['size'], screen_height_cm,
                              state['viewing_distance_cm'])
-    return {
+    ecc = eccentricity_deg(state['x_pos'], screen_height_cm,
+                           state['viewing_distance_cm'])
+    frames = None if refresh_hz is None else mode_frames(state, refresh_hz)
+    record = {
         'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
         'stimulus_type': state['stimulus_type'],
         'mode': state['mode'],
+        'dual_stimulus': bool(state['dual']),
         'x_position': round(state['x_pos'], STORE_DP),
         'y_position': round(state['y_pos'], STORE_DP),
         'background_gray': round(state['bg_gray'], STORE_DP),
@@ -692,8 +854,16 @@ def state_record(state, screen_height_cm):
         'contrast': round(state['contrast'], STORE_DP),
         'custom_frequency_hz': state['custom_freq_hz'],
         'visual_angle_deg': None if angle is None else round(angle, 2),
+        'eccentricity_deg': None if ecc is None else round(ecc, 2),
         'stimulus_specific': stimulus_specific(state),
     }
+    # Only meaningful while a flicker mode is active; the realised rate is
+    # what the frame count actually delivers, never the requested value.
+    if frames is not None:
+        record['flicker_frames_per_cycle'] = frames
+        record['flicker_realized_hz'] = round(
+            frames_to_hz(frames, refresh_hz), 3)
+    return record
 
 
 def write_json(state, resolution, refresh_hz, screen_height_cm, final=None):
@@ -770,6 +940,7 @@ def main(argv=None):
 
     state = default_state(stimulus_type)
     state['image_path'] = image_label
+    state['aspect'] = resolution[0] / float(resolution[1])
     table = knob_table(stimulus_type)
 
     # ---- Stimuli (PRD 4) -----------------------------------------------------
@@ -815,10 +986,34 @@ def main(argv=None):
         lineWidth=1.0, colorSpace='rgb', lineColor='white',
         fillColor='white', depth=0.0, interpolate=True, autoLog=False)
 
+    # Full-screen patch for gamma stepping (PRD 6.2). Width is the aspect
+    # ratio because in height units the screen is 1.0 tall and aspect wide.
+    gamma_patch = visual.Rect(
+        win=win, width=state['aspect'], height=1.0, pos=(0, 0),
+        lineWidth=0, lineColor=None,
+        fillColor=[GAMMA_LEVELS[state['gamma_step_index']]] * 3,
+        colorSpace='rgb', autoLog=False)
+
+    # PRD 6.4 renders the uniform patch regardless of the selected type, so
+    # this one exists even when the session is running a Gabor.
+    uniformity_patch = visual.Rect(
+        win=win, width=state['size'], height=state['size'], pos=(0, 0),
+        lineWidth=0, lineColor=None,
+        fillColor=[state['r'], state['g'], state['b']],
+        colorSpace='rgb', opacity=state['alpha'],
+        contrast=state['contrast'], autoLog=False)
+
     hud = visual.TextStim(
         win, text='', font=READOUT_FONT, height=0.018, color='white',
         pos=(0, -0.42), wrapWidth=1.8, alignText='center',
         anchorHoriz='center', autoLog=False)
+
+    flash = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=0.030, color='yellow',
+        pos=(0, 0.42), alignText='center', anchorHoriz='center',
+        autoLog=False)
+    flash_frames = 0
+    flash_text = ''
 
     # Rebuilding the Gaussian mask uploads a 256x256 texture, so it happens
     # only when the SD or the size it is relative to actually changes.
@@ -864,6 +1059,27 @@ def main(argv=None):
     while running:
         # ---- Input -----------------------------------------------------------
         for key in event.getKeys():
+            # --- Mode switching (PRD 6). Phase resets on every switch. -------
+            if key in MODE_KEYS:
+                if state['mode'] != MODE_KEYS[key]:
+                    state['mode'] = MODE_KEYS[key]
+                    state['frame_idx'] = 0
+                continue
+            if key == DUAL_KEY:
+                state['dual'] = not state['dual']
+                continue
+
+            # --- Arrows are claimed by two modes (PRD 6.2, 6.4) -------------
+            if state['mode'] == MODE_GAMMA and key in ('left', 'right'):
+                step = 1 if key == 'right' else -1
+                state['gamma_step_index'] = int(clamp(
+                    state['gamma_step_index'] + step, 0,
+                    len(GAMMA_LEVELS) - 1))
+                continue
+            if state['mode'] == MODE_UNIFORMITY and move_uniformity(state,
+                                                                    key):
+                continue
+
             if key in table:
                 # Repeat-enabled knobs swallow the OS's own repeat events; the
                 # clock below is the only thing allowed to advance them.
@@ -872,9 +1088,12 @@ def main(argv=None):
                 apply_knob(state, key, table)
             elif key == 's':
                 state['snapshots'].append(
-                    state_record(state, screen_height_cm))
+                    state_record(state, screen_height_cm, measured_refresh))
                 write_json(state, resolution, measured_refresh,
                            screen_height_cm)
+                flash_text = 'Snapshot #{} saved'.format(
+                    len(state['snapshots']))
+                flash_frames = FLASH_FRAMES
                 print("SNAPSHOT {} saved.".format(len(state['snapshots'])))
             elif key in ('q', 'escape'):
                 running = False
@@ -941,25 +1160,57 @@ def main(argv=None):
                 stim.opacity = state['alpha']
 
         # ---- Draw ------------------------------------------------------------
-        if state['mode'] == MODE_STATIC_ON and stim is not None:
-            stim.draw()
-        # static_off draws background + fixation only. Flicker modes next.
+        mode = state['mode']
+        frames = mode_frames(state, measured_refresh)
+
+        if mode == MODE_GAMMA:
+            gamma_patch.width = state['aspect']
+            gamma_patch.fillColor = [
+                GAMMA_LEVELS[state['gamma_step_index']]] * 3
+            gamma_patch.draw()
+        elif mode == MODE_UNIFORMITY:
+            name = UNIFORMITY_GRID[state['uniformity_grid_index']]
+            uniformity_patch.width = state['size']
+            uniformity_patch.height = state['size']
+            uniformity_patch.pos = uniformity_xy(name, state['aspect'],
+                                                 state['size'])
+            uniformity_patch.fillColor = [state['r'], state['g'], state['b']]
+            uniformity_patch.opacity = state['alpha']
+            uniformity_patch.contrast = state['contrast']
+            uniformity_patch.draw()
+        elif mode == MODE_STATIC_OFF:
+            pass                      # background + fixation only (PRD 6)
+        elif stim is not None:
+            # static_on, or the ON half of a flicker cycle. stim_is_on is
+            # stateless in frame_idx, which resets on every mode switch.
+            if frames is None or stim_is_on(state['frame_idx'], frames):
+                stim.draw()
+                if state['dual']:
+                    # PRD 6.3: the mirrored copy at -X, same flicker phase.
+                    stim.pos = (-state['x_pos'], state['y_pos'])
+                    stim.draw()
+                    stim.pos = (state['x_pos'], state['y_pos'])
 
         # Fixation cross in every mode EXCEPT gamma steps (PRD 6.2): there the
         # photometer sits at screen centre and a cross under the aperture would
         # corrupt the gamma curve everything else depends on.
-        if state['mode'] != MODE_GAMMA:
+        if mode != MODE_GAMMA:
             fixation.draw()
 
         hud.text = build_hud(state, resolution, measured_refresh,
                              measured_refresh, screen_height_cm)
         hud.draw()
 
+        if flash_frames > 0:
+            flash.text = flash_text
+            flash.draw()
+            flash_frames -= 1
+
         win.flip()
         state['frame_idx'] += 1
 
     # ---- Quit ----------------------------------------------------------------
-    final = state_record(state, screen_height_cm)
+    final = state_record(state, screen_height_cm, measured_refresh)
     path = write_json(state, resolution, measured_refresh, screen_height_cm,
                       final=final)
     win.close()

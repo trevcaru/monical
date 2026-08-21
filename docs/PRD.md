@@ -76,6 +76,7 @@ python monical.py --image assets/texture.png
       "contrast": 1.000,
       "custom_frequency_hz": 15,
       "visual_angle_deg": 6.43,
+      "eccentricity_deg": 28.57,
       "stimulus_specific": {}
     }
   ],
@@ -272,13 +273,23 @@ Renders the uniform patch (regardless of selected stimulus type) at preset grid 
 
 ## 7. Visual angle calculator
 
-Active in all modes. Uses the current viewing distance and stimulus size to compute visual angle in degrees:
+Active in all modes. Uses the current viewing distance with the stimulus size and position to compute two different angles in degrees.
+
+**Size — an extent.** The stimulus straddles the line of sight, half falling either side, so the extent is halved and the resulting angle doubled:
 
 ```
 angle_deg = 2 * atan(size_cm / (2 * distance_cm)) * (180 / pi)
 ```
 
-Where `size_cm` is derived from the stimulus size in height units and the monitor's physical height. If physical monitor dimensions aren't detectable, prompt for manual entry on the info screen.
+**Eccentricity — a displacement.** The offset from fixation falls entirely on one side, so there is no factor of 2:
+
+```
+ecc_deg = atan(x_cm / distance_cm) * (180 / pi)
+```
+
+Using the extent formula for eccentricity overstates it, and the error grows with distance from fixation: at x = 0.66 height units on a 33 cm-tall panel at 40 cm it reports 30.46° against the correct 28.57°, and at x = 1.0 it reports 44.83° against 39.52°.
+
+Where `size_cm` and `x_cm` are derived from the stimulus size and x position in height units and the monitor's physical height. If physical monitor dimensions aren't detectable, both readouts show `--` rather than a guess.
 
 Readout shows both stimulus size (degrees) and eccentricity (degrees) on screen at all times.
 

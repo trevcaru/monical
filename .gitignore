@@ -1,0 +1,6 @@
+# Per-session rig data. Reference only, regenerated every run.
+calibration_values.json
+
+# Python bytecode
+__pycache__/
+*.pyc
