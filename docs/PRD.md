@@ -159,6 +159,29 @@ Rect(win=win, width=w, height=h, fillColor=[r, g, b],
 
 Note: PsychoPy color range is -1 to 1. Mid-gray = 0. Black = -1. White = 1.
 
+### 4.5 Custom PNG
+
+User-supplied texture loaded from a PNG file. For calibrating with experiment-specific stimuli, verifying custom patterns, or checking rendering of imported images.
+
+**Construction:**
+```python
+ImageStim(win=win, image=filepath, size=size,
+          contrast=contrast, opacity=alpha,
+          pos=(x, y), autoLog=False)
+```
+
+**File selection:** On the intro screen, when the user presses `[5]`, open a file dialog (`psychopy.gui.fileOpenDlg` or tkinter fallback) to select a `.png` file. Store the path. If no file is selected, fall back to a 256×256 checkerboard test pattern generated with NumPy.
+
+**Stimulus-specific parameters:**
+
+| Param | Key | Increment | Default | Range |
+|-------|-----|-----------|---------|-------|
+| Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 |
+
+All universal parameters apply: position, size, contrast, background, flicker, viewing distance.
+
+**Stimulus-specific snapshot fields:** `{"filepath": "...", "alpha": 1.0}`
+
 ---
 
 ## 5. Universal parameters
@@ -258,6 +281,14 @@ Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] frames)
 Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
 ```
 
+Line 5 for `custom_png` shows:
+
+```
+File: [filename] | Alpha: [a:.3f]
+```
+
+Filename only, not the full path — the path can be arbitrarily long and Line 5 is a single readout line. The full path is recorded in the snapshot.
+
 ---
 
 ## 9. Intro screen
@@ -280,11 +311,19 @@ SELECT STIMULUS TYPE:
   [2] Gabor patch (attention/perception)
   [3] Sinusoidal grating (contrast/SF tuning)
   [4] Uniform patch (color/luminance calibration)
+  [5] Custom PNG (your own texture)
 ```
 
 **Section 3 — Workflow tutorial (adapts to selection):**
 
-Shows the recommended calibration workflow and the keybindings relevant to the selected stimulus type. Updates live as the user presses 1–4.
+Shows the recommended calibration workflow and the keybindings relevant to the selected stimulus type. Updates live as the user presses 1–5.
+
+Custom PNG workflow block:
+
+```
+Load your experiment texture, verify rendering at target
+size/position/contrast.
+```
 
 **Section 4 — Proceed:**
 ```
