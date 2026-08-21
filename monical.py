@@ -23,6 +23,7 @@ Stimuli, parameter knobs, modes, and the HUD are not implemented yet.
 
 import os
 import json
+import argparse
 import datetime
 
 import numpy as np
@@ -42,12 +43,29 @@ except Exception as _err:                                    # noqa: BLE001
     HAS_RADIAL = False
     RADIAL_ERR = '{}: {}'.format(type(_err).__name__, _err)
 
+# Held-key detection for the auto-repeat knobs. event.getKeys() is edge
+# triggered and cannot report that a key is STILL down, so repeat needs the
+# pyglet key state directly (the window is winType='pyglet'). Guarded: without
+# it the tool loses auto-repeat only, and every knob still works per press.
+try:
+    from pyglet.window import key as pyglet_key
+    HAS_KEYSTATE = True
+except Exception:                                            # noqa: BLE001
+    pyglet_key = None
+    HAS_KEYSTATE = False
+
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
 
 MONICAL_VERSION = '0.1'
+
+# PRD 5.2 fixes DISPLAY precision, which is coarser than some defaults are
+# (size 0.225 -> "0.23"). Knob values are stored -- in state and in the JSON --
+# at 4 dp, the seed tool's precedent, and rounded only for the HUD. Rounding
+# the file to display precision would lose the value the scientist dialled in.
+STORE_DP = 4
 
 REQUESTED_RESOLUTION = (1920, 1080)
 SCREEN_INDEX = 0
@@ -65,15 +83,25 @@ STIM_RADIAL = 'radial_checkerboard'
 STIM_GABOR = 'gabor'
 STIM_GRATING = 'grating'
 STIM_UNIFORM = 'uniform_patch'
+STIM_CUSTOM_PNG = 'custom_png'
 
-STIMULUS_TYPES = [STIM_RADIAL, STIM_GABOR, STIM_GRATING, STIM_UNIFORM]
+STIMULUS_TYPES = [STIM_RADIAL, STIM_GABOR, STIM_GRATING, STIM_UNIFORM,
+                  STIM_CUSTOM_PNG]
 
 STIMULUS_LABELS = {
     STIM_RADIAL: 'Radial checkerboard (SSVEP standard)',
     STIM_GABOR: 'Gabor patch (attention/perception)',
     STIM_GRATING: 'Sinusoidal grating (contrast/SF tuning)',
     STIM_UNIFORM: 'Uniform patch (color/luminance calibration)',
+    STIM_CUSTOM_PNG: 'Custom PNG (your own texture)',
 }
+
+FIXATION_SIZE = (0.07, 0.07)      # experiment FIXATION_SIZE, from the seed
+
+# PRD 4.5 fallback when --image is absent or unreadable.
+TEST_PATTERN_RES = 256
+TEST_PATTERN_CELLS = 8
+GENERATED_LABEL = '<generated 8x8 checkerboard>'
 
 # Modes. Named here so the scaffold's state dict and JSON records already use
 # the final vocabulary; only static_on is reachable until modes land.
@@ -96,6 +124,109 @@ UNIFORMITY_GRID = [
 ]
 
 
+# -----------------------------------------------------------------------------
+# Universal parameter knobs (PRD 5). One table drives both the key handler and
+# the auto-repeat loop, so a step or a range is defined in exactly one place.
+#
+#   key -> (state field, delta, low, high, kind)
+#
+# kind is 'float' (clamped, stored at STORE_DP), 'int' (clamped, rounded to a
+# whole number) or 'wrap' (modulo the high limit -- orientation only, where
+# 355 + 5 must land on 0 rather than sticking at 360).
+#
+# Within a pair the FIRST key listed in the PRD increases: [C/V], [F/H], [;/'],
+# [Z/X], [R/T], [E/W], [D/A]. LEFT/RIGHT and PAGEUP/PAGEDN follow the arrow.
+#
+# PsychoPy names keys with pyglet's symbol_string() lowercased, which is where
+# 'pageup', 'pagedown', 'semicolon', 'apostrophe' and 'num_add' come from.
+# -----------------------------------------------------------------------------
+
+STEP_POS = 0.01
+STEP_BG = 0.001                   # fine, for photometer luminance matching
+STEP_SIZE = 0.01
+STEP_CONTRAST = 0.001             # fine, for photometer luminance matching
+STEP_FREQ = 1
+STEP_DISTANCE = 1
+
+KNOBS = {
+    'right':        ('x_pos', +STEP_POS, -1.0, 1.0, 'float'),
+    'left':         ('x_pos', -STEP_POS, -1.0, 1.0, 'float'),
+    'pageup':       ('y_pos', +STEP_POS, -0.5, 0.5, 'float'),
+    'pagedown':     ('y_pos', -STEP_POS, -0.5, 0.5, 'float'),
+    'up':           ('bg_gray', +STEP_BG, -1.0, 1.0, 'float'),
+    'down':         ('bg_gray', -STEP_BG, -1.0, 1.0, 'float'),
+    'equal':        ('size', +STEP_SIZE, 0.01, 2.0, 'float'),
+    'plus':         ('size', +STEP_SIZE, 0.01, 2.0, 'float'),
+    'num_add':      ('size', +STEP_SIZE, 0.01, 2.0, 'float'),
+    'minus':        ('size', -STEP_SIZE, 0.01, 2.0, 'float'),
+    'num_subtract': ('size', -STEP_SIZE, 0.01, 2.0, 'float'),
+    'c':            ('contrast', +STEP_CONTRAST, 0.0, 1.0, 'float'),
+    'v':            ('contrast', -STEP_CONTRAST, 0.0, 1.0, 'float'),
+    'f':            ('custom_freq_hz', +STEP_FREQ, 1, 120, 'int'),
+    'h':            ('custom_freq_hz', -STEP_FREQ, 1, 120, 'int'),
+    'semicolon':    ('viewing_distance_cm', +STEP_DISTANCE, 1, 500, 'int'),
+    'apostrophe':   ('viewing_distance_cm', -STEP_DISTANCE, 1, 500, 'int'),
+}
+
+# Stimulus-specific knobs (PRD 4.2-4.5), overlaid on KNOBS once the type is
+# chosen. The same four key pairs are reused with different meanings per type
+# -- the open question in PRD 12.1 -- so the intro tutorial and HUD line 5 both
+# spell out the active legend.
+STEP_SF = 0.5
+STEP_ORI = 5.0
+STEP_PHASE = 0.05
+STEP_SD = 0.01
+STEP_RGB = 0.001
+STEP_ALPHA = 0.01
+
+_GRATING_KNOBS = {
+    'z': ('sf', +STEP_SF, 0.5, 50.0, 'float'),
+    'x': ('sf', -STEP_SF, 0.5, 50.0, 'float'),
+    'r': ('ori', +STEP_ORI, 0.0, 360.0, 'wrap'),
+    't': ('ori', -STEP_ORI, 0.0, 360.0, 'wrap'),
+    'e': ('phase', +STEP_PHASE, 0.0, 1.0, 'float'),
+    'w': ('phase', -STEP_PHASE, 0.0, 1.0, 'float'),
+}
+
+STIM_KNOBS = {
+    STIM_RADIAL: {},                          # locked to the standard form
+    STIM_GABOR: dict(_GRATING_KNOBS, **{
+        'd': ('envelope_sd', +STEP_SD, 0.01, 1.0, 'float'),
+        'a': ('envelope_sd', -STEP_SD, 0.01, 1.0, 'float'),
+    }),
+    STIM_GRATING: dict(_GRATING_KNOBS),       # same, minus the envelope
+    STIM_UNIFORM: {
+        'r': ('r', +STEP_RGB, -1.0, 1.0, 'float'),
+        't': ('r', -STEP_RGB, -1.0, 1.0, 'float'),
+        'e': ('g', +STEP_RGB, -1.0, 1.0, 'float'),
+        'w': ('g', -STEP_RGB, -1.0, 1.0, 'float'),
+        'd': ('b', +STEP_RGB, -1.0, 1.0, 'float'),
+        'a': ('b', -STEP_RGB, -1.0, 1.0, 'float'),
+        'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
+        'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
+    },
+    STIM_CUSTOM_PNG: {
+        'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
+        'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
+    },
+}
+
+# PRD 5.1 -- only these auto-repeat. At 0.001 per press they need ~1000 presses
+# to cross their range; every other knob is coarse enough to stay single-press.
+REPEAT_KEYS = ('up', 'down', 'c', 'v')
+# ...plus the colour channels, which share the 0.001 step and so the same
+# problem. Alpha is 0.01 and stays single-press.
+REPEAT_KEYS_BY_STIM = {
+    STIM_UNIFORM: ('r', 't', 'e', 'w', 'd', 'a'),
+}
+
+# Clock-driven rather than frame-driven, so the rate is the same whatever the
+# panel refresh turns out to be (20/s is one increment every 3 frames at 60 Hz,
+# every 12 at 240 Hz).
+REPEAT_DELAY_S = 1.0              # hold this long before repeating starts
+REPEAT_RATE_HZ = 20.0             # increments per second once it starts
+
+
 # The 4x4 balanced checker texture (PRD 4.1). Every row carries two +1 and two
 # -1, so each annulus of the radial warp is sign-balanced independently of
 # unequal annulus areas. Defined here so the construction is locked to the
@@ -116,6 +247,41 @@ def stim_is_on(frame_idx, frames):
 
 def clamp(value, low, high):
     return max(low, min(high, value))
+
+
+def knob_table(stimulus_type):
+    """Universal knobs plus the chosen type's own. Built once per session."""
+    table = dict(KNOBS)
+    table.update(STIM_KNOBS.get(stimulus_type, {}))
+    return table
+
+
+def repeat_key_names(stimulus_type):
+    return tuple(REPEAT_KEYS) + tuple(
+        REPEAT_KEYS_BY_STIM.get(stimulus_type, ()))
+
+
+def apply_knob(state, key, table):
+    """Apply one increment of the knob bound to `key`. True if it moved.
+
+    Every knob goes through here -- single press and auto-repeat alike -- so a
+    held key and a tapped key can never drift apart. Floats are re-rounded each
+    step because 0.001 has no exact binary form and 1000 accumulations would
+    otherwise leave the readout showing 0.4999999999.
+    """
+    spec = table.get(key)
+    if spec is None:
+        return False
+    field, delta, low, high, kind = spec
+    value = state[field] + delta
+    if kind == 'wrap':
+        # Orientation is cyclic: 355 + 5 is 0, not a clamp at 360.
+        state[field] = round(value % high, STORE_DP)
+    elif kind == 'int':
+        state[field] = int(round(clamp(value, low, high)))
+    else:
+        state[field] = round(clamp(value, low, high), STORE_DP)
+    return True
 
 
 # =============================================================================
@@ -150,6 +316,10 @@ def default_state(stimulus_type):
         'b': 0.0,
         'alpha': 1.0,
 
+        # Custom PNG (PRD 4.5). Resolved at startup; GENERATED_LABEL when the
+        # fallback pattern is in use.
+        'image_path': GENERATED_LABEL,
+
         # Mode-local indices
         'gamma_step_index': 5,
         'uniformity_grid_index': 0,
@@ -158,6 +328,57 @@ def default_state(stimulus_type):
         'frame_idx': 0,
         'snapshots': [],
     }
+
+
+# =============================================================================
+# STIMULUS CONSTRUCTION  (PRD 4)
+# =============================================================================
+
+def make_test_pattern(res=TEST_PATTERN_RES, cells=TEST_PATTERN_CELLS):
+    """PRD 4.5 fallback: res x res checkerboard, cells x cells squares, -1/+1.
+
+    Same value convention as CHECKER_PATTERN -- PsychoPy textures run -1
+    (black) to +1 (white), so this is a full-contrast pattern before the
+    contrast knob scales it.
+    """
+    block = max(1, res // cells)
+    index = np.arange(res) // block
+    return np.where((index[:, None] + index[None, :]) % 2 == 0,
+                    1.0, -1.0).astype(np.float32)
+
+
+def resolve_image(path):
+    """(image for ImageStim, label). Falls back to the generated pattern.
+
+    PRD 4.5: a missing file prints an error and falls back rather than dying --
+    a calibration session should not be lost to a typo in a path.
+    """
+    if not path:
+        return make_test_pattern(), GENERATED_LABEL
+    if not os.path.isfile(path):
+        print("ERROR: --image file not found: {}".format(path))
+        print("       Falling back to the generated test pattern.")
+        return make_test_pattern(), GENERATED_LABEL
+    return path, os.path.abspath(path)
+
+
+def gauss_sd_param(size, envelope_sd):
+    """PsychoPy 'sd' for a Gaussian envelope whose SD is `envelope_sd` units.
+
+    PsychoPy's maskParams 'sd' is NOT a standard deviation in stimulus units.
+    createLumPattern builds the mask as exp(-rad^2 / (2 * (1/sd)^2)) where rad
+    runs 0 at centre to 1 at the stimulus edge, so 'sd' is the NUMBER OF SDs
+    that fit between centre and edge (its default, 3, is the familiar
+    "3 sd.s by the edge"). Passing the PRD's envelope_sd straight through would
+    mean sd=0.06 -> edge alpha 0.998, i.e. a hard-edged grating with no visible
+    envelope at all.
+
+    Converting: the envelope SD in stimulus units is (size / 2) / sd, so
+    sd = (size / 2) / envelope_sd. At the defaults (size 0.225, SD 0.06) that
+    gives 1.875, and the realised 1-SD half-width measures 0.06 height units.
+    """
+    radius = max(size, 1e-6) / 2.0
+    return radius / max(envelope_sd, 1e-6)
 
 
 # =============================================================================
@@ -245,10 +466,25 @@ WORKFLOWS = {
         "KNOBS: [R/T] red   [E/W] green   [D/A] blue   [Z/X] alpha",
         "       plus the universal knobs.",
     ],
+    STIM_CUSTOM_PNG: [
+        "Load your experiment texture, verify rendering at target",
+        "size/position/contrast.",
+        "",
+        "1. Gamma calibrate first [G].",
+        "2. Static ON [1]: set size and position to the values your",
+        "   experiment uses, then photometer the patch.",
+        "3. Compare against the same texture rendered by your",
+        "   experiment. Any difference is a rendering-path problem,",
+        "   not a display one.",
+        "4. Snapshot [S] -- the full path is recorded with it.",
+        "",
+        "KNOBS: [Z/X] alpha   plus the universal knobs.",
+        "Pass a file with:  python monical.py --image path.png",
+    ],
 }
 
 
-def build_intro_text(resolution, refresh_hz, selected_index):
+def build_intro_text(resolution, refresh_hz, selected_index, image_label):
     plugin_line = ('psychopy_visionscience  [OK]' if HAS_RADIAL else
                    'psychopy_visionscience  [FAILED -- '
                    'pip install psychopy-visionscience]')
@@ -280,6 +516,9 @@ def build_intro_text(resolution, refresh_hz, selected_index):
             "!!     pip install psychopy-visionscience",
         ]
 
+    if selected == STIM_CUSTOM_PNG:
+        lines += ["", "Texture: {}".format(image_label[-58:])]
+
     lines += [""] + WORKFLOWS[selected]
     lines += [
         "",
@@ -290,7 +529,7 @@ def build_intro_text(resolution, refresh_hz, selected_index):
     return "\n".join(lines)
 
 
-def show_intro(win, resolution, refresh_hz):
+def show_intro(win, resolution, refresh_hz, image_label):
     """White on black. Returns the chosen stimulus type, or None if aborted."""
     previous_color = win.color
     win.color = [-1, -1, -1]
@@ -298,9 +537,11 @@ def show_intro(win, resolution, refresh_hz):
     win.flip()
     win.flip()
 
+    select_keys = [str(i + 1) for i in range(len(STIMULUS_TYPES))]
     selected_index = 0
     text = visual.TextStim(
-        win, text=build_intro_text(resolution, refresh_hz, selected_index),
+        win, text=build_intro_text(resolution, refresh_hz, selected_index,
+                                   image_label),
         font=READOUT_FONT, height=0.020, color='white',
         pos=(0, 0), wrapWidth=1.7, alignText='left', anchorHoriz='center',
         autoLog=False)
@@ -311,9 +552,9 @@ def show_intro(win, resolution, refresh_hz):
         win.flip()
 
         dirty = False
-        for key in event.getKeys(keyList=['1', '2', '3', '4',
-                                          'space', 'q', 'escape']):
-            if key in ('1', '2', '3', '4'):
+        for key in event.getKeys(keyList=select_keys +
+                                 ['space', 'q', 'escape']):
+            if key in select_keys:
                 selected_index = int(key) - 1
                 dirty = True
             elif key in ('space', 'q', 'escape'):
@@ -326,20 +567,74 @@ def show_intro(win, resolution, refresh_hz):
 
         if dirty:
             text.text = build_intro_text(
-                resolution, refresh_hz, selected_index)
+                resolution, refresh_hz, selected_index, image_label)
+
+
+# =============================================================================
+# HUD  (PRD 8, precision per PRD 5.2)
+# =============================================================================
+
+def hz_to_frames(hz, refresh_hz):
+    """Nearest integer frame count for a requested Hz at the measured rate."""
+    return max(2, int(round(refresh_hz / float(hz))))
+
+
+def frames_to_hz(frames, refresh_hz):
+    """Realised Hz. Never a rounded literal -- always derived from frames."""
+    return refresh_hz / float(frames)
+
+
+def _deg(value):
+    return '--' if value is None else '{:.2f}'.format(value)
+
+
+def stim_line(state):
+    """HUD line 5. Adapts to the stimulus type (PRD 8)."""
+    stim_type = state['stimulus_type']
+    if stim_type in (STIM_GABOR, STIM_GRATING):
+        line = 'SF: {:.2f} c/unit | Ori: {:.1f} deg | Phase: {:.2f}'.format(
+            state['sf'], state['ori'], state['phase'])
+        if stim_type == STIM_GABOR:
+            line += ' | SD: {:.3f} (mask sd {:.2f})'.format(
+                state['envelope_sd'],
+                gauss_sd_param(state['size'], state['envelope_sd']))
+        return line
+    if stim_type == STIM_UNIFORM:
+        return 'R: {:.3f} | G: {:.3f} | B: {:.3f} | Alpha: {:.3f}'.format(
+            state['r'], state['g'], state['b'], state['alpha'])
+    if stim_type == STIM_CUSTOM_PNG:
+        # Filename only; the full path goes in the snapshot (PRD 8).
+        return 'File: {} | Alpha: {:.3f}'.format(
+            os.path.basename(state['image_path']), state['alpha'])
+    return 'No stimulus-specific parameters (construction locked)'
+
+
+def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm):
+    """The five lines of PRD 8, rebuilt every frame."""
+    size_deg = visual_angle_deg(state['size'], screen_height_cm,
+                                state['viewing_distance_cm'])
+    ecc_deg = visual_angle_deg(state['x_pos'], screen_height_cm,
+                               state['viewing_distance_cm'])
+    frames = hz_to_frames(state['custom_freq_hz'], refresh_hz)
+
+    return '\n'.join([
+        '{}x{} | {:.2f} Hz | PsychoPy {} | Dist: {} cm'.format(
+            resolution[0], resolution[1], live_hz, PSYCHOPY_VERSION,
+            state['viewing_distance_cm']),
+        'Mode: {} | Stim: {}'.format(state['mode'], state['stimulus_type']),
+        'X: {:.2f} | Y: {:.2f} | Size: {:.2f} ({} deg) | Ecc: {} deg'.format(
+            state['x_pos'], state['y_pos'], state['size'],
+            _deg(size_deg), _deg(ecc_deg)),
+        'BG: {:.3f} | Contrast: {:.3f} | Freq: {:.3f} Hz ({} frames)'.format(
+            state['bg_gray'], state['contrast'],
+            frames_to_hz(frames, refresh_hz), frames),
+        stim_line(state),
+    ])
 
 
 # =============================================================================
 # OUTPUT  (PRD 3.2)
 # =============================================================================
-
-# PRD 5.2 fixes DISPLAY precision, which is coarser than some defaults are
-# (size 0.225 -> "0.23"). The JSON is a record, not a readout, so knob values
-# are stored at 4 dp -- the seed tool's precedent -- and rounded only for the
-# HUD. Rounding the file to display precision would lose the value the
-# scientist actually dialled in.
-STORE_DP = 4
-
 
 def stimulus_specific(state):
     """Per-type parameters. Radial has none beyond universal (PRD 4.1)."""
@@ -362,6 +657,11 @@ def stimulus_specific(state):
             'r': round(state['r'], STORE_DP),
             'g': round(state['g'], STORE_DP),
             'b': round(state['b'], STORE_DP),
+            'alpha': round(state['alpha'], STORE_DP),
+        }
+    elif stim_type == STIM_CUSTOM_PNG:
+        record = {
+            'filepath': state['image_path'],
             'alpha': round(state['alpha'], STORE_DP),
         }
     else:
@@ -420,7 +720,21 @@ def write_json(state, resolution, refresh_hz, screen_height_cm, final=None):
 # MAIN
 # =============================================================================
 
-def main():
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        prog='monical.py',
+        description='Monitor calibration tool for vision science labs.')
+    parser.add_argument(
+        '--image', metavar='PATH', default=None,
+        help='PNG texture for stimulus type [5]. Without it, [5] uses a '
+             'generated 256x256 checkerboard test pattern.')
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    image, image_label = resolve_image(args.image)
+
     mon = monitors.Monitor(MONITOR_NAME)
 
     win = visual.Window(
@@ -448,28 +762,115 @@ def main():
         print("WARNING: could not measure refresh rate; assuming 60.00 Hz. "
               "Frame-count frequencies will NOT be the stated values.")
 
-    stimulus_type = show_intro(win, resolution, measured_refresh)
+    stimulus_type = show_intro(win, resolution, measured_refresh, image_label)
     if stimulus_type is None:
         win.close()
         print("Aborted at intro screen. Nothing written.")
         core.quit()
 
     state = default_state(stimulus_type)
+    state['image_path'] = image_label
+    table = knob_table(stimulus_type)
+
+    # ---- Stimuli (PRD 4) -----------------------------------------------------
+    stim = None
+    if stimulus_type == STIM_RADIAL:
+        if HAS_RADIAL:
+            # EXACT PRD 4.1 kwargs. Do not add a mask or angularCycles.
+            stim = RadialStim(
+                win=win, tex=CHECKER_PATTERN, size=state['size'],
+                radialCycles=1, texRes=256, opacity=1,
+                contrast=state['contrast'],
+                pos=(state['x_pos'], state['y_pos']),
+                name='calib_disc', autoLog=False)
+        else:
+            print("RadialStim unavailable -- background and fixation only.")
+    elif stimulus_type in (STIM_GABOR, STIM_GRATING):
+        is_gabor = stimulus_type == STIM_GABOR
+        stim = visual.GratingStim(
+            win=win, tex='sin', mask='gauss' if is_gabor else None,
+            size=state['size'], sf=state['sf'], ori=state['ori'],
+            phase=state['phase'], contrast=state['contrast'],
+            pos=(state['x_pos'], state['y_pos']),
+            maskParams=({'sd': gauss_sd_param(state['size'],
+                                              state['envelope_sd'])}
+                        if is_gabor else None),
+            autoLog=False)
+    elif stimulus_type == STIM_UNIFORM:
+        stim = visual.Rect(
+            win=win, width=state['size'], height=state['size'],
+            fillColor=[state['r'], state['g'], state['b']],
+            lineWidth=0, lineColor=None, colorSpace='rgb',
+            opacity=state['alpha'], contrast=state['contrast'],
+            pos=(state['x_pos'], state['y_pos']), autoLog=False)
+    elif stimulus_type == STIM_CUSTOM_PNG:
+        stim = visual.ImageStim(
+            win=win, image=image, size=state['size'],
+            contrast=state['contrast'], opacity=state['alpha'],
+            pos=(state['x_pos'], state['y_pos']), autoLog=False)
+
+    fixation = visual.ShapeStim(
+        win=win, name='fixation_cross', vertices='cross',
+        size=FIXATION_SIZE, ori=0.0, pos=(0.0, 0.0), anchor='center',
+        lineWidth=1.0, colorSpace='rgb', lineColor='white',
+        fillColor='white', depth=0.0, interpolate=True, autoLog=False)
+
+    hud = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=0.018, color='white',
+        pos=(0, -0.42), wrapWidth=1.8, alignText='center',
+        anchorHoriz='center', autoLog=False)
+
+    # Rebuilding the Gaussian mask uploads a 256x256 texture, so it happens
+    # only when the SD or the size it is relative to actually changes.
+    mask_cache = [None]
+
+    # ---- Auto-repeat plumbing (PRD 5.1) --------------------------------------
+    # KeyStateHandler only observes events, so it coexists with PsychoPy's own
+    # handlers behind event.getKeys().
+    key_state = None
+    if HAS_KEYSTATE:
+        try:
+            key_state = pyglet_key.KeyStateHandler()
+            win.winHandle.push_handlers(key_state)
+        except Exception as err:                             # noqa: BLE001
+            key_state = None
+            print("Hold-to-repeat unavailable ({}). Single presses still work."
+                  .format(err))
+
+    repeat_symbols = {}
+    if key_state is not None:
+        for name in repeat_key_names(stimulus_type):
+            symbol = getattr(pyglet_key, name.upper(), None)
+            if symbol is not None:
+                repeat_symbols[name] = symbol
+
+    held_since = {}          # key name -> time it went down
+    repeat_count = {}        # key name -> increments emitted so far this hold
+    repeat_clock = core.Clock()
+
+    def is_os_autorepeat(name):
+        """True when this key is already tracked as held.
+
+        Windows generates its own auto-repeat key events while a key is down,
+        and PsychoPy delivers them through event.getKeys() exactly like real
+        presses. Without this guard a held key would advance at the OS repeat
+        rate AND at our clock-driven rate simultaneously. Only the first press
+        of a hold gets through here; the rest are ours to time.
+        """
+        return name in held_since
 
     # ---- Main loop -----------------------------------------------------------
     running = True
     while running:
-        win.color = [state['bg_gray']] * 3
-
-        # --- STIMULUS RENDERING HERE ---
-
-        # --- HUD RENDERING HERE ---
-
-        win.flip()
-        state['frame_idx'] += 1
-
+        # ---- Input -----------------------------------------------------------
         for key in event.getKeys():
-            if key == 's':
+            if key in table:
+                # Repeat-enabled knobs swallow the OS's own repeat events; the
+                # clock below is the only thing allowed to advance them.
+                if key in repeat_symbols and is_os_autorepeat(key):
+                    continue
+                apply_knob(state, key, table)
+            elif key == 's':
                 state['snapshots'].append(
                     state_record(state, screen_height_cm))
                 write_json(state, resolution, measured_refresh,
@@ -477,6 +878,85 @@ def main():
                 print("SNAPSHOT {} saved.".format(len(state['snapshots'])))
             elif key in ('q', 'escape'):
                 running = False
+
+        if not running:
+            break
+
+        # ---- Hold-to-repeat: background gray and contrast only ---------------
+        # The count due is derived from how long the key has been down, NOT
+        # from the time since the last increment. Those differ: an increment
+        # can only be emitted on a frame boundary, so "wait 1/20 s since the
+        # last one" rounds every interval UP to a whole frame -- 50 ms becomes
+        # 3 frames sometimes and 4 others at 60 Hz, beating the realized rate
+        # down to ~17/s. Measuring against the hold start instead lets a short
+        # interval make up for a long one, so the average holds at exactly
+        # REPEAT_RATE_HZ on any panel.
+        if key_state is not None:
+            now = repeat_clock.getTime()
+            for name, symbol in repeat_symbols.items():
+                if not key_state[symbol]:
+                    held_since.pop(name, None)
+                    repeat_count.pop(name, None)
+                    continue
+                if name not in held_since:
+                    # First frame down. event.getKeys() already applied the
+                    # initial increment above; just start the hold timer.
+                    held_since[name] = now
+                    repeat_count[name] = 0
+                    continue
+                holding = now - held_since[name] - REPEAT_DELAY_S
+                if holding < 0:
+                    continue
+                due = int(holding * REPEAT_RATE_HZ)
+                for _ in range(due - repeat_count.get(name, 0)):
+                    apply_knob(state, name, table)
+                repeat_count[name] = due
+
+        # ---- Live parameter application --------------------------------------
+        win.color = [state['bg_gray']] * 3
+
+        if stim is not None:
+            stim.pos = (state['x_pos'], state['y_pos'])
+            stim.contrast = state['contrast']
+            if stimulus_type == STIM_UNIFORM:
+                stim.width = state['size']
+                stim.height = state['size']
+                stim.fillColor = [state['r'], state['g'], state['b']]
+                stim.opacity = state['alpha']
+            else:
+                stim.size = state['size']
+            if stimulus_type in (STIM_GABOR, STIM_GRATING):
+                stim.sf = state['sf']
+                stim.ori = state['ori']
+                stim.phase = state['phase']
+            if stimulus_type == STIM_GABOR:
+                sd = round(gauss_sd_param(state['size'],
+                                          state['envelope_sd']), 6)
+                if sd != mask_cache[0]:
+                    # Assigning maskParams re-runs the mask setter, which
+                    # rebuilds the texture -- so only do it when sd moves.
+                    stim.maskParams = {'sd': sd}
+                    mask_cache[0] = sd
+            if stimulus_type == STIM_CUSTOM_PNG:
+                stim.opacity = state['alpha']
+
+        # ---- Draw ------------------------------------------------------------
+        if state['mode'] == MODE_STATIC_ON and stim is not None:
+            stim.draw()
+        # static_off draws background + fixation only. Flicker modes next.
+
+        # Fixation cross in every mode EXCEPT gamma steps (PRD 6.2): there the
+        # photometer sits at screen centre and a cross under the aperture would
+        # corrupt the gamma curve everything else depends on.
+        if state['mode'] != MODE_GAMMA:
+            fixation.draw()
+
+        hud.text = build_hud(state, resolution, measured_refresh,
+                             measured_refresh, screen_height_cm)
+        hud.draw()
+
+        win.flip()
+        state['frame_idx'] += 1
 
     # ---- Quit ----------------------------------------------------------------
     final = state_record(state, screen_height_cm)
