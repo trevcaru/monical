@@ -149,6 +149,18 @@ Nothing reads this file back. You transcribe the values into your experiment by 
 
 Not an experiment, not a monitor profiler, not automatic. It does not build or apply gamma tables — PsychoPy Monitor Center does that; Monical helps you collect the measurements. No photodiode input, no closed loop, no mouse, no GUI widgets.
 
+## Citing
+
+If you use Monical in your research, please cite:
+
+> Caruso, T. (2026). Monical: A keyboard-driven monitor calibration tool for vision science. https://github.com/trevcaru/monical
+
+## Support
+
+This tool is free and open-source, and will stay that way. If it saved you time or helped your lab, you can support maintenance:
+
+- [Ko-fi (one-time tip)](https://ko-fi.com/trevcaru)
+
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
