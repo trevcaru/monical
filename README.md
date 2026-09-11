@@ -25,9 +25,9 @@ Pick a stimulus type with `1`–`5`, press `SPACE`. No config files, no build st
 
 | | |
 |---|---|
-| **Radial checkerboard** — SSVEP standard, locked to the 4×4 dartboard construction. Needs the plugin. | **Gabor patch** — sinusoidal carrier under a Gaussian envelope. SF, orientation, phase, envelope SD. |
+| **Radial checkerboard** — SSVEP standard, 4×4 dartboard pattern (example). | **Gabor patch** — sinusoidal carrier under a Gaussian envelope. SF, orientation, phase, envelope SD. |
 | ![Radial checkerboard](docs/img/radial_checkerboard.png) | ![Gabor patch](docs/img/gabor.png) |
-| **Sinusoidal grating** — the same carrier, no envelope. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha. The color and luminance surface. |
+| **Sinusoidal grating** — the same carrier, no envelope. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha (shown: green channel isolated). |
 | ![Sinusoidal grating](docs/img/grating.png) | ![Uniform patch](docs/img/uniform.png) |
 | **Custom PNG** — your own texture via `--image`. Without it, this generated 8×8 checkerboard. | |
 | ![Custom PNG fallback](docs/img/custom_png.png) | |
@@ -67,23 +67,72 @@ The refresh figure is a rolling 120-frame average of real flip-to-flip intervals
 
 ```json
 {
-  "startup_refresh_hz": 239.97,
-  "final_rolling_refresh_hz": 239.94,
-  "total_dropped_frames": 0,
+  "note": "REFERENCE ONLY. Not loaded by any experiment. Values are read by humans and entered manually.",
+  "session_start": "2026-09-11T13:03:21",
+  "session_end": "2026-09-11T13:05:06",
+  "monical_version": "0.1",
+  "monitor_name": "testMonitor",
+  "monitor_resolution": [3440, 1440],
+  "monitor_width_cm": 30.0,
+  "monitor_height_cm": 12.56,
+  "color_space": "rgb",
+  "units": "height",
+  "window_fullscreen": true,
   "vsync": true,
-  "monitor_width_cm": 59.8,
+  "vsync_detail": {
+    "wait_blanking": true,
+    "pyglet_vsync": true,
+    "context_get_vsync": true
+  },
+  "startup_refresh_hz": 60.0,
+  "final_rolling_refresh_hz": 59.972,
+  "final_rolling_refresh_sd_ms": 0.5958,
+  "total_dropped_frames": 1,
+  "psychopy_version": "2026.2.2",
+  "python_version": "3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]",
+  "platform": "win32",
+  "has_radial_stim": true,
+  "image_path": null,
+  "viewing_distance_cm": 40.0,
+  "stimulus_type": "radial_checkerboard",
   "snapshots": [
     {
       "snapshot_number": 1,
+      "timestamp": "2026-09-11T13:04:38",
+      "rolling_refresh_hz": 60.01,
+      "dropped_frames_total": 0,
+      "stimulus_type": "radial_checkerboard",
       "mode": "static_on",
-      "x_position": 0.66,
-      "background_gray": 0.012,
+      "dual_stimulus": false,
+      "x_position": 0.14,
+      "y_position": -0.005,
+      "background_gray": 0.0,
+      "disc_size": 0.225,
       "contrast": 1.0,
-      "visual_angle_deg": 6.43,
-      "eccentricity_deg": 28.57,
+      "custom_frequency_hz": 14,
+      "visual_angle_deg": 4.05,
+      "eccentricity_deg": 2.52,
       "stimulus_specific": {}
     }
-  ]
+  ],
+  "final": {
+    "snapshot_number": null,
+    "timestamp": "2026-09-11T13:05:06",
+    "rolling_refresh_hz": 59.972,
+    "dropped_frames_total": 1,
+    "stimulus_type": "radial_checkerboard",
+    "mode": "static_on",
+    "dual_stimulus": false,
+    "x_position": 0.74,
+    "y_position": 0.02,
+    "background_gray": 0.0,
+    "disc_size": 0.225,
+    "contrast": 1.0,
+    "custom_frequency_hz": 15,
+    "visual_angle_deg": 4.05,
+    "eccentricity_deg": 13.08,
+    "stimulus_specific": {}
+  }
 }
 ```
 

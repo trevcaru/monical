@@ -39,8 +39,10 @@ import matplotlib.pyplot as plt           # noqa: E402
 PSYCHOPY_GRAY = 0.5
 # The uniform patch defaults to rgb 0.0 -- the same mid-gray as the background,
 # so on PSYCHOPY_GRAY it would be genuinely invisible. Its preview gets a
-# darker ground so the patch reads as a shape.
+# darker ground, and shows the green channel driven up rather than the
+# all-zero default, so the patch reads as a shape and as a colour surface.
 UNIFORM_BG = 0.25
+UNIFORM_RGB = (0.0, 0.7, 0.0)             # PsychoPy signed rgb, -1..+1
 TEXT_BG = 0.0                             # intro and HUD are white on black
 
 WIDTH_PX, HEIGHT_PX = 800, 500
@@ -89,10 +91,23 @@ def save(fig, name, bg):
     return path
 
 
+def psychopy_rgb(rgb):
+    """PsychoPy's signed -1..+1 colour to matplotlib's 0..1.
+
+    rgb 0.0 is mid-gray, not black: [0, 0.7, 0] is green added to a mid-gray
+    base, which is what the tool actually puts on screen for that fillColor.
+    """
+    return (np.asarray(rgb, dtype=float) + 1.0) / 2.0
+
+
 def show_field(ax, field, bg):
-    """Draw a luminance array as an image, 0-1, no interpolation."""
-    ax.imshow(field, cmap='gray', vmin=0.0, vmax=1.0,
-              interpolation='nearest', origin='lower')
+    """Draw a 2-D luminance array or a 3-D RGB array, 0-1, no interpolation."""
+    if field.ndim == 3:
+        ax.imshow(np.clip(field, 0.0, 1.0),
+                  interpolation='nearest', origin='lower')
+    else:
+        ax.imshow(field, cmap='gray', vmin=0.0, vmax=1.0,
+                  interpolation='nearest', origin='lower')
     ax.set_xlim(0, field.shape[1])
     ax.set_ylim(0, field.shape[0])
 
@@ -104,8 +119,16 @@ def square_grid(px):
 
 
 def gray_canvas_array(bg, patch, px):
-    """Drop a px-by-px patch, centred, into an 800x500 field of `bg`."""
-    field = np.full((HEIGHT_PX, WIDTH_PX), float(bg))
+    """Drop a px-by-px patch, centred, into an 800x500 field of `bg`.
+
+    An RGB patch promotes the whole field to RGB so a coloured stimulus can
+    sit on a gray ground.
+    """
+    if patch.ndim == 3:
+        field = np.empty((HEIGHT_PX, WIDTH_PX, 3))
+        field[:, :] = float(bg)
+    else:
+        field = np.full((HEIGHT_PX, WIDTH_PX), float(bg))
     top = (HEIGHT_PX - px) // 2
     left = (WIDTH_PX - px) // 2
     field[top:top + px, left:left + px] = patch
@@ -193,8 +216,14 @@ def grating(px=420):
 
 
 def uniform_patch(px=420):
-    """Solid mid-gray, the rgb 0.0 default, on a darker ground."""
-    return np.full((px, px), PSYCHOPY_GRAY)
+    """Solid colour at UNIFORM_RGB, on a darker ground.
+
+    Shows the green channel driven up from the all-zero default, since three
+    zeros render as the same mid-gray as the background.
+    """
+    patch = np.empty((px, px, 3))
+    patch[:, :] = psychopy_rgb(UNIFORM_RGB)
+    return patch
 
 
 def fallback_checker(px=416):
