@@ -60,15 +60,41 @@ python monical.py --image assets/texture.png
 ```json
 {
   "monical_version": "0.1",
+  "session_start": "2026-08-21T14:30:12",
+  "session_end": "2026-08-21T14:47:03",
+  "monitor_name": "testMonitor",
   "monitor_resolution": [1920, 1080],
-  "measured_refresh_hz": 239.97,
+  "monitor_width_cm": 59.8,
+  "monitor_height_cm": 33.6,
+  "color_space": "rgb",
+  "units": "height",
+  "window_fullscreen": true,
+  "vsync": true,
+  "vsync_detail": {
+    "wait_blanking": true,
+    "pyglet_vsync": true,
+    "context_get_vsync": false
+  },
+  "startup_refresh_hz": 239.97,
+  "final_rolling_refresh_hz": 239.94,
+  "final_rolling_refresh_sd_ms": 0.1203,
+  "total_dropped_frames": 0,
   "psychopy_version": "2024.2.4",
+  "python_version": "3.11.0 ...",
+  "platform": "win32",
+  "has_radial_stim": true,
+  "image_path": null,
   "viewing_distance_cm": 40.0,
+  "stimulus_type": "radial_checkerboard",
   "snapshots": [
     {
+      "snapshot_number": 1,
       "timestamp": "2026-08-21T14:32:01",
+      "rolling_refresh_hz": 239.94,
+      "dropped_frames_total": 0,
       "stimulus_type": "radial_checkerboard",
       "mode": "static_on",
+      "dual_stimulus": false,
       "x_position": 0.66,
       "y_position": 0.00,
       "background_gray": 0.012,
@@ -84,7 +110,13 @@ python monical.py --image assets/texture.png
 }
 ```
 
-`stimulus_specific` holds per-type parameters (SF, ori, phase, SD, R, G, B, alpha — whichever apply).
+`stimulus_specific` holds per-type parameters (SF, ori, phase, SD, R, G, B, alpha — whichever apply), plus the mode-local values: `gamma_level` in gamma steps, `grid_position` and coordinates in spatial uniformity.
+
+Snapshots taken in a flicker mode also carry `flicker_frames_per_cycle` and `flicker_realized_hz`.
+
+**Refresh rate vs frame rate.** `startup_refresh_hz` is the one-shot `getMsPerFrame` measurement taken before the intro screen. `final_rolling_refresh_hz` is the mean of actual flip-to-flip intervals over the last 120 frames, which is a *loop* rate — it equals the display's refresh rate only while vsync holds `flip()` to the retrace, which is why `vsync` is recorded beside it. If the two figures diverge by more than 5 Hz the tool warns on the console, since that usually means the startup measurement fell back to a default and every frame-count frequency in the session is built on a wrong number.
+
+A frame counts toward `total_dropped_frames` when its flip-to-flip interval exceeds 1.5× the rolling median interval.
 
 ---
 
@@ -206,17 +238,23 @@ Active in all stimulus modes.
 
 | Param | Key | Increment | Default | Range |
 |-------|-----|-----------|---------|-------|
-| X position | `[LEFT/RIGHT]` | ±0.01 | 0.66 | -1.0–1.0 |
-| Y position | `[PAGEUP/PAGEDN]` | ±0.01 | 0.00 | -0.5–0.5 |
-| Background gray | `[UP/DOWN]` | ±0.001 | 0.000 | -1.0–1.0 |
+| X position | `[LEFT/RIGHT]` | ±0.005 | 0.66 | -1.0–1.0 |
+| Y position | `[UP/DOWN]` | ±0.005 | 0.00 | -0.5–0.5 |
+| Background gray | `[PAGEUP/PAGEDN]` | ±0.001 | 0.000 | -1.0–1.0 |
 | Disc/patch size | `[+/-]` | ±0.01 | 0.225 | 0.01–2.0 |
 | Contrast | `[C/V]` | ±0.001 | 1.000 | 0.0–1.0 |
 | Custom frequency | `[F/H]` | ±1 Hz | 15 | 1–120 |
 | Viewing distance | `[;/']` | ±1 cm | 40 | 1–500 |
 
+Arrows move the stimulus; the page keys adjust the background behind it.
+
 ### 5.1 Key repeat
 
-Background gray, contrast, and color channels (R/G/B): after 1 second of holding the key, auto-repeat at ~20 increments per second. All other knobs are single-press.
+X position, Y position, background gray, contrast, and color channels (R/G/B): after 1 second of holding the key, auto-repeat at ~60 increments per second — roughly one increment per frame at 60 Hz, one every four frames at 240 Hz. The coarser knobs (size, custom frequency, viewing distance) are single-press.
+
+Repeat is measured against the moment the key went down, not against the last increment emitted. An increment can only land on a frame boundary, so "wait 1/rate since the last one" rounds every interval up to a whole frame and beats the realized rate below the target; accumulating against the hold start lets a short interval compensate for a long one.
+
+Two modes claim the arrow keys for themselves — gamma steps takes LEFT/RIGHT, spatial uniformity takes all four (§6.2, §6.4). While those modes are active the arrows do not repeat and do not move the stimulus. The page keys are never claimed, so background gray stays adjustable in every mode.
 
 ### 5.2 Display precision
 

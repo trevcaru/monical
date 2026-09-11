@@ -22,9 +22,11 @@ Stimuli, parameter knobs, modes, and the HUD are not implemented yet.
 """
 
 import os
+import sys
 import json
 import argparse
 import datetime
+import collections
 
 import numpy as np
 
@@ -169,13 +171,13 @@ FLASH_FRAMES = 60                 # how long the snapshot confirmation shows
 # 355 + 5 must land on 0 rather than sticking at 360).
 #
 # Within a pair the FIRST key listed in the PRD increases: [C/V], [F/H], [;/'],
-# [Z/X], [R/T], [E/W], [D/A]. LEFT/RIGHT and PAGEUP/PAGEDN follow the arrow.
+# [Z/X], [R/T], [E/W], [D/A]. The arrows and PAGEUP/PAGEDN follow the arrow.
 #
 # PsychoPy names keys with pyglet's symbol_string() lowercased, which is where
 # 'pageup', 'pagedown', 'semicolon', 'apostrophe' and 'num_add' come from.
 # -----------------------------------------------------------------------------
 
-STEP_POS = 0.01
+STEP_POS = 0.005                  # fine placement; auto-repeats to cover range
 STEP_BG = 0.001                   # fine, for photometer luminance matching
 STEP_SIZE = 0.01
 STEP_CONTRAST = 0.001             # fine, for photometer luminance matching
@@ -183,12 +185,13 @@ STEP_FREQ = 1
 STEP_DISTANCE = 1
 
 KNOBS = {
+    # Arrows move the stimulus; page keys adjust the background behind it.
     'right':        ('x_pos', +STEP_POS, -1.0, 1.0, 'float'),
     'left':         ('x_pos', -STEP_POS, -1.0, 1.0, 'float'),
-    'pageup':       ('y_pos', +STEP_POS, -0.5, 0.5, 'float'),
-    'pagedown':     ('y_pos', -STEP_POS, -0.5, 0.5, 'float'),
-    'up':           ('bg_gray', +STEP_BG, -1.0, 1.0, 'float'),
-    'down':         ('bg_gray', -STEP_BG, -1.0, 1.0, 'float'),
+    'up':           ('y_pos', +STEP_POS, -0.5, 0.5, 'float'),
+    'down':         ('y_pos', -STEP_POS, -0.5, 0.5, 'float'),
+    'pageup':       ('bg_gray', +STEP_BG, -1.0, 1.0, 'float'),
+    'pagedown':     ('bg_gray', -STEP_BG, -1.0, 1.0, 'float'),
     'equal':        ('size', +STEP_SIZE, 0.01, 2.0, 'float'),
     'plus':         ('size', +STEP_SIZE, 0.01, 2.0, 'float'),
     'num_add':      ('size', +STEP_SIZE, 0.01, 2.0, 'float'),
@@ -245,9 +248,12 @@ STIM_KNOBS = {
     },
 }
 
-# PRD 5.1 -- only these auto-repeat. At 0.001 per press they need ~1000 presses
-# to cross their range; every other knob is coarse enough to stay single-press.
-REPEAT_KEYS = ('up', 'down', 'c', 'v')
+# Auto-repeating knobs. At 0.001 (bg, contrast, RGB) or 0.005 (position) per
+# press these need hundreds of presses to cross their range; the coarser knobs
+# -- size, frequency, distance -- stay single-press.
+REPEAT_KEYS = ('left', 'right', 'up', 'down',      # x / y position
+               'pageup', 'pagedown',               # background gray
+               'c', 'v')                           # contrast
 # ...plus the colour channels, which share the 0.001 step and so the same
 # problem. Alpha is 0.01 and stays single-press.
 REPEAT_KEYS_BY_STIM = {
@@ -255,10 +261,29 @@ REPEAT_KEYS_BY_STIM = {
 }
 
 # Clock-driven rather than frame-driven, so the rate is the same whatever the
-# panel refresh turns out to be (20/s is one increment every 3 frames at 60 Hz,
-# every 12 at 240 Hz).
+# panel refresh turns out to be (60/s is one increment per frame at 60 Hz, one
+# every 4 frames at 240 Hz).
 REPEAT_DELAY_S = 1.0              # hold this long before repeating starts
-REPEAT_RATE_HZ = 20.0             # increments per second once it starts
+REPEAT_RATE_HZ = 60.0             # increments per second once it starts
+
+# Live frame timing. The rolling window is long enough to average out jitter
+# but short enough to react within about half a second on a fast panel.
+ROLLING_FRAMES = 120
+# A frame counts as dropped when its flip-to-flip interval runs past this
+# multiple of the rolling MEDIAN interval -- 1.5x sits clear of ordinary jitter
+# but below the 2.0x that a single missed vsync would produce. Median rather
+# than the startup figure so the threshold self-calibrates to the panel that is
+# actually running, and median rather than mean so the drops themselves do not
+# inflate the threshold that detects them.
+DROP_FACTOR = 1.5
+# Below this many samples the median is too noisy to threshold against, so the
+# startup measurement stands in.
+MIN_DROP_SAMPLES = 15
+
+# Startup getMsPerFrame and the rolling average should agree. When they do not,
+# one of them is wrong -- most often getMsPerFrame having fallen back -- and
+# every frame-count frequency in the session is suspect.
+DIVERGENCE_WARN_HZ = 5.0
 
 
 # The 4x4 balanced checker texture (PRD 4.1). Every row carries two +1 and two
@@ -330,6 +355,61 @@ def move_uniformity(state, key):
     name = UNIFORMITY_LAYOUT[int(clamp(row, 0, 2))][int(clamp(col, 0, 2))]
     state['uniformity_grid_index'] = UNIFORMITY_GRID.index(name)
     return True
+
+
+def mode_claims_key(state, key):
+    """True when the active mode has taken this key off the knob table.
+
+    Gamma steps owns LEFT/RIGHT and spatial uniformity owns all four arrows
+    (PRD 6.2, 6.4). Those arrows are also position knobs now that X and Y
+    auto-repeat, so this has to be consulted in TWO places: the press handler
+    and the repeat loop. Without it a held arrow would drive x_pos invisibly
+    underneath a gamma or uniformity screen, and an 11-step gamma ramp would
+    blow past both ends in a fraction of a second.
+    """
+    if state['mode'] == MODE_GAMMA:
+        return key in ('left', 'right')
+    if state['mode'] == MODE_UNIFORMITY:
+        return key in ('left', 'right', 'up', 'down')
+    return False
+
+
+def rolling_stats(intervals):
+    """(Hz, SD in ms, median interval in s), or (None, None, None).
+
+    Mean of the intervals rather than of the per-frame rates: rate is the
+    reciprocal of a duration, so averaging rates would bias the result. The
+    median comes back too because the drop threshold keys off it.
+    """
+    if len(intervals) < 2:
+        return None, None, None
+    arr = np.asarray(intervals, dtype=float)
+    mean_s = float(arr.mean())
+    if mean_s <= 0:
+        return None, None, None
+    return (1.0 / mean_s, float(arr.std(ddof=1)) * 1000.0,
+            float(np.median(arr)))
+
+
+def vsync_state(win):
+    """(is_on, detail). Which attribute said so is recorded, because they lie.
+
+    PsychoPy has no `useRetrace`. `waitBlanking` is the flag that actually
+    governs whether flip() blocks on the retrace, so that is the answer; the
+    pyglet-level values go in beside it because on Windows the driver query
+    routinely disagrees with the setting that is in force.
+    """
+    detail = {}
+    wait = getattr(win, 'waitBlanking', None)
+    detail['wait_blanking'] = None if wait is None else bool(wait)
+    handle = getattr(win, 'winHandle', None)
+    detail['pyglet_vsync'] = bool(getattr(handle, 'vsync', False)) \
+        if handle is not None else None
+    try:
+        detail['context_get_vsync'] = bool(handle.context.get_vsync())
+    except Exception:                                        # noqa: BLE001
+        detail['context_get_vsync'] = None
+    return bool(wait), detail
 
 
 def mode_frames(state, refresh_hz):
@@ -550,7 +630,7 @@ WORKFLOWS = {
         "4. Snapshot [S] at each matched position.",
         "5. Flicker [3][4][5]: photodiode + scope, check waveform.",
         "",
-        "KNOBS: [LEFT/RIGHT] X   [PAGEUP/PAGEDN] Y   [UP/DOWN] BG",
+        "KNOBS: [ARROWS] move stimulus X/Y   [PAGEUP/PAGEDN] BG",
         "       [+/-] size   [C/V] contrast   [F/H] custom Hz",
     ],
     STIM_GABOR: [
@@ -750,7 +830,8 @@ def stim_line(state):
     return 'No stimulus-specific parameters (construction locked)'
 
 
-def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm):
+def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
+              sd_ms=None, drops=0):
     """The five lines of PRD 8, rebuilt every frame."""
     size_deg = visual_angle_deg(state['size'], screen_height_cm,
                                 state['viewing_distance_cm'])
@@ -771,9 +852,15 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm):
             frames // 2, frames - frames // 2)
 
     return '\n'.join([
-        '{}x{} | {:.2f} Hz | PsychoPy {} | Dist: {} cm'.format(
-            resolution[0], resolution[1], live_hz, PSYCHOPY_VERSION,
-            state['viewing_distance_cm']),
+        # Rolling rate, not the startup measurement: a panel that is dropping
+        # frames should say so while it is happening.
+        # The sigma is rendered by TextStim, never printed: the Windows console
+        # is cp1252 and would raise UnicodeEncodeError on it.
+        u'{}x{} | {:.2f} Hz ({}) | Drops: {} | PsychoPy {} | Dist: {} cm'.format(
+            resolution[0], resolution[1], live_hz,
+            u'σ=--' if sd_ms is None
+            else u'σ={:.2f}ms'.format(sd_ms),
+            drops, PSYCHOPY_VERSION, state['viewing_distance_cm']),
         mode_line(state),
         'X: {:.2f} | Y: {:.2f} | Size: {:.2f} ({} deg) | Ecc: {} deg'.format(
             state['x_pos'], state['y_pos'], state['size'],
@@ -843,14 +930,19 @@ def stimulus_specific(state):
     return record
 
 
-def state_record(state, screen_height_cm, refresh_hz=None):
+def state_record(state, screen_height_cm, refresh_hz=None,
+                 rolling_hz=None, drops=None, snapshot_number=None):
     angle = visual_angle_deg(state['size'], screen_height_cm,
                              state['viewing_distance_cm'])
     ecc = eccentricity_deg(state['x_pos'], screen_height_cm,
                            state['viewing_distance_cm'])
     frames = None if refresh_hz is None else mode_frames(state, refresh_hz)
     record = {
+        'snapshot_number': snapshot_number,
         'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
+        'rolling_refresh_hz': (None if rolling_hz is None
+                               else round(rolling_hz, 3)),
+        'dropped_frames_total': drops,
         'stimulus_type': state['stimulus_type'],
         'mode': state['mode'],
         'dual_stimulus': bool(state['dual']),
@@ -873,19 +965,60 @@ def state_record(state, screen_height_cm, refresh_hz=None):
     return record
 
 
-def write_json(state, resolution, refresh_hz, screen_height_cm, final=None):
+def session_header(win, mon, resolution, screen_height_cm, startup_hz,
+                   image_arg):
+    """Everything about the rig that does not change during the session.
+
+    Captured once, at startup, so a reader months later can tell what the
+    numbers below were measured on -- which units and colour space they are
+    in, how big the screen physically was, and whether the radial plugin was
+    even available.
+    """
+    try:
+        width_cm = mon.getWidth()
+    except Exception:                                        # noqa: BLE001
+        width_cm = None
+    vsync_on, vsync_info = vsync_state(win)
+    return {
+        'session_start': datetime.datetime.now().isoformat(timespec='seconds'),
+        'session_end': None,
+        'monical_version': MONICAL_VERSION,
+        'monitor_name': MONITOR_NAME,
+        'monitor_resolution': list(resolution),
+        'monitor_width_cm': None if not width_cm else round(float(width_cm), 2),
+        'monitor_height_cm': (None if screen_height_cm is None
+                              else round(screen_height_cm, 2)),
+        'color_space': 'rgb',
+        'units': UNITS,
+        'window_fullscreen': bool(getattr(win, 'fullscr', False)),
+        'vsync': vsync_on,
+        # Recorded because the rolling figure below is a LOOP rate, and only
+        # equals the display's refresh rate while vsync is holding flip() to
+        # the retrace. With vsync off the loop free-runs and the number means
+        # something else entirely.
+        'vsync_detail': vsync_info,
+        'startup_refresh_hz': round(float(startup_hz), 3),
+        'final_rolling_refresh_hz': None,
+        'final_rolling_refresh_sd_ms': None,
+        'total_dropped_frames': 0,
+        'psychopy_version': str(PSYCHOPY_VERSION),
+        'python_version': sys.version,
+        'platform': sys.platform,
+        'has_radial_stim': bool(HAS_RADIAL),
+        'image_path': image_arg,
+    }
+
+
+def write_json(state, session, final=None):
+    """Rewritten in full on every [S] and on [Q]. Overwritten each run."""
     payload = {
         'note': ('REFERENCE ONLY. Not loaded by any experiment. '
                  'Values are read by humans and entered manually.'),
-        'monical_version': MONICAL_VERSION,
-        'monitor_resolution': list(resolution),
-        'measured_refresh_hz': round(float(refresh_hz), 3),
-        'psychopy_version': str(PSYCHOPY_VERSION),
-        'viewing_distance_cm': float(state['viewing_distance_cm']),
-        'monitor_height_cm': (None if screen_height_cm is None
-                              else round(screen_height_cm, 2)),
-        'snapshots': state['snapshots'],
     }
+    payload.update(session)
+    payload['viewing_distance_cm'] = float(state['viewing_distance_cm'])
+    payload['stimulus_type'] = state['stimulus_type']
+    payload['snapshots'] = state['snapshots']
     if final is not None:
         payload['final'] = final
     with open(OUT_PATH, 'w') as handle:
@@ -1050,6 +1183,17 @@ def main(argv=None):
     repeat_count = {}        # key name -> increments emitted so far this hold
     repeat_clock = core.Clock()
 
+    # ---- Live frame timing (rolling, not the one-shot startup figure) -------
+    session = session_header(win, mon, resolution, screen_height_cm,
+                             measured_refresh, args.image)
+    frame_clock = core.Clock()
+    intervals = collections.deque(maxlen=ROLLING_FRAMES)
+    startup_threshold = DROP_FACTOR / measured_refresh
+    dropped_frames = 0
+    total_flips = 0
+    rolling_hz, rolling_sd_ms = measured_refresh, None
+    divergence_warned = False
+
     def is_os_autorepeat(name):
         """True when this key is already tracked as held.
 
@@ -1077,14 +1221,14 @@ def main(argv=None):
                 continue
 
             # --- Arrows are claimed by two modes (PRD 6.2, 6.4) -------------
-            if state['mode'] == MODE_GAMMA and key in ('left', 'right'):
-                step = 1 if key == 'right' else -1
-                state['gamma_step_index'] = int(clamp(
-                    state['gamma_step_index'] + step, 0,
-                    len(GAMMA_LEVELS) - 1))
-                continue
-            if state['mode'] == MODE_UNIFORMITY and move_uniformity(state,
-                                                                    key):
+            if mode_claims_key(state, key):
+                if state['mode'] == MODE_GAMMA:
+                    step = 1 if key == 'right' else -1
+                    state['gamma_step_index'] = int(clamp(
+                        state['gamma_step_index'] + step, 0,
+                        len(GAMMA_LEVELS) - 1))
+                else:
+                    move_uniformity(state, key)
                 continue
 
             if key in table:
@@ -1094,10 +1238,11 @@ def main(argv=None):
                     continue
                 apply_knob(state, key, table)
             elif key == 's':
-                state['snapshots'].append(
-                    state_record(state, screen_height_cm, measured_refresh))
-                write_json(state, resolution, measured_refresh,
-                           screen_height_cm)
+                state['snapshots'].append(state_record(
+                    state, screen_height_cm, measured_refresh,
+                    rolling_hz=rolling_hz, drops=dropped_frames,
+                    snapshot_number=len(state['snapshots']) + 1))
+                write_json(state, session)
                 flash_text = 'Snapshot #{} saved'.format(
                     len(state['snapshots']))
                 flash_frames = FLASH_FRAMES
@@ -1121,6 +1266,13 @@ def main(argv=None):
             now = repeat_clock.getTime()
             for name, symbol in repeat_symbols.items():
                 if not key_state[symbol]:
+                    held_since.pop(name, None)
+                    repeat_count.pop(name, None)
+                    continue
+                if mode_claims_key(state, name):
+                    # Gamma and uniformity own the arrows in their modes. Do
+                    # not repeat them: those are discrete steps through short
+                    # lists, and do not touch x_pos behind the mode's back.
                     held_since.pop(name, None)
                     repeat_count.pop(name, None)
                     continue
@@ -1207,7 +1359,8 @@ def main(argv=None):
             fixation.draw()
 
         hud.text = build_hud(state, resolution, measured_refresh,
-                             measured_refresh, screen_height_cm)
+                             rolling_hz, screen_height_cm,
+                             sd_ms=rolling_sd_ms, drops=dropped_frames)
         hud.draw()
 
         if flash_frames > 0:
@@ -1218,9 +1371,51 @@ def main(argv=None):
         win.flip()
         state['frame_idx'] += 1
 
+        # ---- Frame timing, measured at the flip ------------------------------
+        # The first interval spans window setup and the intro screen, so it is
+        # discarded rather than counted as a drop.
+        interval = frame_clock.getTime()
+        frame_clock.reset()
+        total_flips += 1
+        if total_flips > 1:
+            # Threshold against the median of the window BEFORE this frame
+            # joins it, so a long frame cannot raise the bar it has to clear.
+            hz, sd_ms, median_s = rolling_stats(intervals)
+            if median_s is not None and len(intervals) >= MIN_DROP_SAMPLES:
+                threshold = DROP_FACTOR * median_s
+            else:
+                threshold = startup_threshold
+            if interval > threshold:
+                dropped_frames += 1
+
+            intervals.append(interval)
+            hz, sd_ms, _median = rolling_stats(intervals)
+            if hz is not None:
+                rolling_hz, rolling_sd_ms = hz, sd_ms
+                # Once only: a full window that disagrees with getMsPerFrame
+                # means one of the two is wrong, and the frame counts driving
+                # every flicker frequency are built on the startup figure.
+                if (not divergence_warned
+                        and len(intervals) >= ROLLING_FRAMES
+                        and abs(rolling_hz - measured_refresh)
+                        > DIVERGENCE_WARN_HZ):
+                    divergence_warned = True
+                    print("WARNING: rolling refresh ({:.1f} Hz) diverges from "
+                          "startup measurement ({:.1f} Hz) -- timing may be "
+                          "unreliable".format(rolling_hz, measured_refresh))
+
     # ---- Quit ----------------------------------------------------------------
-    final = state_record(state, screen_height_cm, measured_refresh)
-    path = write_json(state, resolution, measured_refresh, screen_height_cm,
+    session['session_end'] = datetime.datetime.now().isoformat(
+        timespec='seconds')
+    session['final_rolling_refresh_hz'] = (
+        None if rolling_hz is None else round(rolling_hz, 3))
+    session['final_rolling_refresh_sd_ms'] = (
+        None if rolling_sd_ms is None else round(rolling_sd_ms, 4))
+    session['total_dropped_frames'] = dropped_frames
+
+    final = state_record(state, screen_height_cm, measured_refresh,
+                         rolling_hz=rolling_hz, drops=dropped_frames)
+    path = write_json(state, session,
                       final=final)
     win.close()
 
