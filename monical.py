@@ -127,6 +127,12 @@ MODE_KEYS = {
 
 FLICKER_HZ = {MODE_FLICKER_15: 15, MODE_FLICKER_20: 20}
 
+# Modes where the photometer is pointed at the measured surface itself, so the
+# fixation cross is hidden rather than drawn over the aperture (PRD 6.2 for
+# gamma; spatial uniformity needs it too, since the centre cell of the 3x3 puts
+# the patch exactly under the cross).
+FIXATION_HIDDEN_MODES = (MODE_GAMMA, MODE_UNIFORMITY)
+
 # [7] toggles dual rendering, which is a flag rather than a mode because
 # PRD 6.3 says both copies "flicker at the same frequency IF IN A FLICKER
 # MODE" -- that only has meaning while a flicker mode is still selected, so
@@ -723,7 +729,8 @@ def stim_line(state):
     if state['mode'] == MODE_GAMMA:
         return 'Gamma steps: LEFT/RIGHT to change level | fixation hidden'
     if state['mode'] == MODE_UNIFORMITY:
-        return 'Spatial uniformity: ARROWS move the patch across the 3x3 grid'
+        return ('Spatial uniformity: ARROWS move the patch across the 3x3 '
+                'grid | fixation hidden')
     stim_type = state['stimulus_type']
     if stim_type in (STIM_GABOR, STIM_GRATING):
         line = 'SF: {:.2f} c/unit | Ori: {:.1f} deg | Phase: {:.2f}'.format(
@@ -1191,10 +1198,12 @@ def main(argv=None):
                     stim.draw()
                     stim.pos = (state['x_pos'], state['y_pos'])
 
-        # Fixation cross in every mode EXCEPT gamma steps (PRD 6.2): there the
-        # photometer sits at screen centre and a cross under the aperture would
-        # corrupt the gamma curve everything else depends on.
-        if mode != MODE_GAMMA:
+        # Fixation cross in every mode EXCEPT the two measured ones. In gamma
+        # steps (PRD 6.2) the photometer sits at screen centre; in spatial
+        # uniformity it sits on the patch, which passes through centre at the
+        # middle cell. Either way a cross under the aperture would corrupt the
+        # reading, and the gamma curve is what everything else depends on.
+        if mode not in FIXATION_HIDDEN_MODES:
             fixation.draw()
 
         hud.text = build_hud(state, resolution, measured_refresh,
