@@ -31,7 +31,7 @@ Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build st
 | **Sinusoidal grating** — the same carrier, no envelope. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha (shown: green channel isolated). |
 | ![Sinusoidal grating](docs/img/grating.png) | ![Uniform patch](docs/img/uniform.png) |
 | **Custom PNG** — your own texture via `--image`. Without it, this generated 8×8 checkerboard. | **Text / letter string** — monospaced strings for legibility and acuity checks. Cycle presets with `B`/`N`, or pass `--text`. |
-| ![Custom PNG fallback](docs/img/custom_png.png) | |
+| ![Custom PNG fallback](docs/img/custom_png.png) | ![Text stimulus](docs/img/text.png) |
 
 ## Modes
 
@@ -55,6 +55,7 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |
 | `H` | show/hide the readout (stimulus keeps rendering) |
 | `B`/`N` | text type only: cycle preset strings |
+| `M` | keybinding reference card for the current stimulus type |
 
 Position, background, contrast and the color channels auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).
 
@@ -62,7 +63,9 @@ Position, background, contrast and the color channels auto-repeat at ~60/s after
 
 ![HUD readout](docs/img/hud_example.png)
 
-Five lines, updated every frame: measured refresh with frame-interval σ and a dropped-frame counter, mode and output filename, geometry in both degrees and pixels, luminance and realized flicker rate with its duty cycle, then the active stimulus parameters. `0` hides it.
+Five lines, updated every frame: measured refresh with frame-interval σ and a dropped-frame counter, mode and output filename, geometry in both degrees and pixels, luminance and realized flicker rate with its duty cycle, then the active stimulus parameters. `H` hides it.
+
+Below that, a dimmer status bar that **never hides** — toggle states, the custom frequency with its keys, the mode, and the output file. `M` overlays a full keybinding card for the current stimulus type.
 
 The refresh figure is a rolling 120-frame average of real flip-to-flip intervals, not the startup measurement — if the two disagree by more than 5 Hz the tool says so, because every flicker frame count depends on getting it right.
 

@@ -148,14 +148,19 @@ mode key replaces the current mode.
 | `P` | Save the current knobs as a preset in `presets/`. Confirms with the filename. |
 | `F12` | Save a PNG of the current frame to `screenshots/`. Confirms with the filename. |
 | `A` | Gamma mode only: start or cancel the auto sweep (§5g). |
-| `H` | Show/hide the readout. Stimulus and fixation keep rendering. |
+| `H` | Show/hide the readout. Stimulus, fixation and the status bar keep rendering. |
+| `M` | Show/hide the keybinding reference card for the current stimulus type. |
 | `B` / `N` | Text type only: cycle preset strings forward/back. |
 | `Q` or `ESC` | Write final state plus all snapshots, then exit. |
 
 While an auto gamma sweep is running, `ESC` cancels the sweep instead of
 quitting — a mistimed press cannot end the session mid-ramp.
 
-**The HUD toggle is `H`.** Custom-frequency-down is `J`, not `H`. Hiding the
+**The HUD toggle is `H`.** Custom-frequency-down is `J`, not `H`.
+
+`ESC` is claimed in order: dismiss the menu, else cancel a running gamma
+sweep, else quit — so neither overlay can be closed by accidentally ending
+the session. Hiding the
 readout hides only the text; the stimulus, fixation cross and gamma patch all
 keep drawing, which is what you want for an unobstructed photometer reading or
 a clean screenshot.
@@ -381,6 +386,10 @@ long enough for your probe to settle, step manually with `S` instead.
 1. Select `[6]` at startup. Press `1` (static ON).
 2. Cycle to the string you want with `B` / `N`, or start with
    `--text "MYSTRING"`.
+
+   **The glyphs are invisible at defaults.** Text colour starts at
+   R=G=B=0.000, which is the same mid-gray as the background. Drive a channel
+   up with `R`/`E`/`D` or take the background down with `PAGEDN` first.
 3. Set the size knob until line 3 reports the letter height you need in
    degrees. The pixel figure beside it tells you whether the glyphs have
    enough pixels to be rendered faithfully — below ~10 px tall, antialiasing
@@ -541,6 +550,30 @@ current custom setting *would* produce.
 **Line 5 — stimulus-specific.** The active key legend's values. For a Gabor it
 shows the envelope SD in height units plus the PsychoPy `mask sd` it converts
 to, since those are different quantities.
+
+### The status bar
+
+Below the readout, in smaller dimmer text, one line that is **always visible —
+it does not hide with `H`**:
+
+```
+[H] Text: ON | [M] Menu: OFF | [F/J] Custom Hz: 15 | Mode: static_on | File: monical_2026-09-18_143201.json
+```
+
+Both toggle states, the custom frequency with the keys that change it, the
+mode, and where the session is writing. With the readout hidden you can still
+see all of it. The `[F/J] Custom Hz` field is the only place on screen that
+tells you how to change the rate mode `5` flickers at.
+
+### The keybinding card
+
+`M` overlays a reference card for the current stimulus type on a dark panel at
+88% opacity — the stimulus keeps rendering behind it. The card lists movement,
+display, frequency, modes and actions, plus a `THIS STIMULUS` block that
+changes per type and a line for whichever keys the active mode has taken over.
+
+Knobs stay live while the card is up, so you can adjust a value while reading
+how. `M` again or `ESC` dismisses it.
 
 ---
 

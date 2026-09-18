@@ -133,6 +133,22 @@ MONITOR_H_MAX_CM = 80.0
 # free it (PRD 5).
 HUD_TOGGLE_KEY = 'h'
 
+# [M] toggles the full keybinding reference card (PRD 8.3).
+MENU_TOGGLE_KEY = 'm'
+
+# The status bar sits below the HUD and never hides: smaller and dimmer than
+# the readout so the two are visually distinct (PRD 8.2).
+STATUS_HEIGHT = 0.013
+STATUS_POS = (0, -0.487)
+STATUS_COLOR = 'lightgray'
+STATUS_NAME_CHARS = 34            # filename budget before truncation
+
+MENU_HEIGHT = 0.021
+MENU_BOX_W_FRAC = 0.72            # of screen width
+MENU_BOX_H_FRAC = 0.62            # of screen height -- about 60% centred
+MENU_BOX_OPACITY = 0.88
+MENU_PAD = 0.03                   # gap between the panel edge and the text
+
 FIXATION_SIZE = (0.07, 0.07)      # experiment FIXATION_SIZE, from the seed
 
 # PRD 4.5 fallback when --image is absent or unreadable.
@@ -571,8 +587,10 @@ def default_state(stimulus_type):
         'font': TEXT_FONT,
 
         # HUD visibility (PRD 8.1). Only the readout hides; every stimulus
-        # keeps rendering.
+        # and the status bar keep rendering.
         'hud_visible': True,
+        # Keybinding overlay (PRD 8.3).
+        'menu_visible': False,
 
         # Mode-local indices
         'gamma_step_index': 5,
@@ -778,14 +796,15 @@ WORKFLOWS = {
         "       plus the universal knobs.",
     ],
     STIM_TEXT: [
-        "1. Cycle preset strings with [B]/[N], or pass your own",
-        "   with --text \"MYSTRING\".",
+        "1. Cycle preset strings with [B]/[N].",
         "2. Adjust size for the target letter height in degrees;",
-        "   HUD line 3 shows it in degrees and pixels.",
-        "3. Step contrast for a legibility threshold.",
+        "   readout line 3 shows degrees and pixels.",
+        "3. Set text colour with [R/T], [E/W], [D/A]; step contrast",
+        "   with [C/V].",
         "",
-        "KNOBS: [B/N] cycle string   [R/T] red   [E/W] green",
-        "       [D/A] blue   [Z/X] alpha   plus the universal knobs.",
+        "KNOBS: [B/N] cycle string  [R/T] red  [E/W] green",
+        "       [D/A] blue  [Z/X] alpha",
+        "       plus the universal knobs. [M] for the full card.",
     ],
     STIM_CUSTOM_PNG: [
         "Load your experiment texture, verify rendering at target",
@@ -974,13 +993,70 @@ def stim_line(state, sweep=None):
         return 'R: {:.3f} | G: {:.3f} | B: {:.3f} | Alpha: {:.3f}'.format(
             state['r'], state['g'], state['b'], state['alpha'])
     if stim_type == STIM_TEXT:
-        return "Text: '{}' | Font: {} | Alpha: {:.3f}".format(
-            state['text_string'], state['font'], state['alpha'])
+        return ("Text: '{}' | R: {:.3f} | G: {:.3f} | B: {:.3f} | "
+                "Alpha: {:.3f}").format(
+                    state['text_string'], state['r'], state['g'],
+                    state['b'], state['alpha'])
     if stim_type == STIM_CUSTOM_PNG:
         # Filename only; the full path goes in the snapshot (PRD 8).
         return 'File: {} | Alpha: {:.3f}'.format(
             os.path.basename(state['image_path']), state['alpha'])
     return 'No stimulus-specific parameters (construction locked)'
+
+
+def build_status_bar(state, out_name=''):
+    """PRD 8.2. One dim line, always drawn, never hidden by [H].
+
+    Carries the two toggle states and the custom-frequency value with its
+    keys -- mode 5 is otherwise undiscoverable, since nothing else on screen
+    says how to change the rate it flickers at.
+    """
+    name = out_name or '-'
+    if len(name) > STATUS_NAME_CHARS:
+        name = '...' + name[-(STATUS_NAME_CHARS - 3):]
+    return ('[{}] Text: {} | [{}] Menu: {} | [F/J] Custom Hz: {} | '
+            'Mode: {} | File: {}').format(
+                HUD_TOGGLE_KEY.upper(),
+                'ON' if state['hud_visible'] else 'OFF',
+                MENU_TOGGLE_KEY.upper(),
+                'ON' if state['menu_visible'] else 'OFF',
+                state['custom_freq_hz'], state['mode'], name)
+
+
+MENU_STIM_KEYS = {
+    STIM_RADIAL: 'none -- construction locked to the SSVEP standard form',
+    STIM_GABOR: 'Z/X = SF | R/T = Orientation | E/W = Phase | D/A = Env SD',
+    STIM_GRATING: 'Z/X = SF | R/T = Orientation | E/W = Phase',
+    STIM_UNIFORM: 'R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha',
+    STIM_CUSTOM_PNG: 'Z/X = Alpha',
+    STIM_TEXT: ('B/N = Cycle string | R/T = Red | E/W = Green | '
+                'D/A = Blue | Z/X = Alpha'),
+}
+
+
+def build_menu_text(state):
+    """PRD 8.3. The full reference card, adapted to the active type."""
+    lines = [
+        'KEYBINDINGS -- {}'.format(
+            STIMULUS_LABELS[state['stimulus_type']]),
+        '',
+        'MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position',
+        'DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast',
+        "FREQUENCY: F/J = Custom Hz | ;/' = Viewing distance",
+        'MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom',
+        '           G=Gamma  7=Dual  8=Uniformity',
+        'ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot',
+        '           H=Toggle HUD  M=This menu  Q=Quit',
+        '',
+        'THIS STIMULUS:',
+        '  {}'.format(MENU_STIM_KEYS[state['stimulus_type']]),
+    ]
+    if state['mode'] == MODE_GAMMA:
+        lines += ['', 'GAMMA MODE: LEFT/RIGHT = level | A = auto sweep']
+    elif state['mode'] == MODE_UNIFORMITY:
+        lines += ['', 'UNIFORMITY MODE: ARROWS = move patch across the grid']
+    lines += ['', '[M] or [ESC] to dismiss']
+    return '\n'.join(lines)
 
 
 def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
@@ -1513,6 +1589,30 @@ def main(argv=None):
         pos=(0, -0.42), wrapWidth=1.8, alignText='center',
         anchorHoriz='center', autoLog=False)
 
+    # PRD 8.2: always drawn, dimmer and smaller than the HUD so the two do
+    # not read as one block.
+    status = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=STATUS_HEIGHT,
+        color=STATUS_COLOR, pos=STATUS_POS, wrapWidth=1.9,
+        alignText='center', anchorHoriz='center', autoLog=False)
+
+    # PRD 8.3: semi-transparent panel so the stimulus stays visible behind.
+    menu_box = visual.Rect(
+        win=win, width=state['aspect'] * MENU_BOX_W_FRAC,
+        height=MENU_BOX_H_FRAC, pos=(0, 0), lineWidth=0, lineColor=None,
+        fillColor=[-0.85, -0.85, -0.85], colorSpace='rgb',
+        opacity=MENU_BOX_OPACITY, autoLog=False)
+    # Anchored to the panel's left inner edge, not to screen centre: with
+    # anchorHoriz='center' PsychoPy centres a box of width wrapWidth on pos,
+    # so a wrapWidth wider than the screen pushes the first column off the
+    # left edge entirely.
+    _menu_w = state['aspect'] * MENU_BOX_W_FRAC
+    menu_text = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=MENU_HEIGHT, color='white',
+        pos=(-_menu_w / 2.0 + MENU_PAD, 0),
+        wrapWidth=_menu_w - 2 * MENU_PAD,
+        alignText='left', anchorHoriz='left', autoLog=False)
+
     flash = visual.TextStim(
         win, text='', font=READOUT_FONT, height=0.030, color='yellow',
         pos=(0, 0.42), alignText='center', anchorHoriz='center',
@@ -1630,6 +1730,16 @@ def main(argv=None):
                         len(GAMMA_LEVELS) - 1))
                 else:
                     move_uniformity(state, key)
+                continue
+
+            if key == MENU_TOGGLE_KEY:
+                state['menu_visible'] = not state['menu_visible']
+                continue
+            # ESC is claimed in order: dismiss the menu, else cancel a running
+            # sweep, else quit. Quitting is the last resort so neither overlay
+            # can be closed by accidentally ending the session.
+            if key == 'escape' and state['menu_visible']:
+                state['menu_visible'] = False
                 continue
 
             if key == HUD_TOGGLE_KEY:
@@ -1811,6 +1921,17 @@ def main(argv=None):
                                  sweep=sweep,
                                  out_name=os.path.basename(out_path))
             hud.draw()
+
+        # Always drawn, whatever [H] says (PRD 8.2).
+        status.text = build_status_bar(state, os.path.basename(out_path))
+        status.draw()
+
+        if state['menu_visible']:
+            menu_box.width = state['aspect'] * MENU_BOX_W_FRAC
+            menu_box.draw()
+            menu_text.pos = (-menu_box.width / 2.0 + MENU_PAD, 0)
+            menu_text.text = build_menu_text(state)
+            menu_text.draw()
 
         if flash_frames > 0:
             flash.text = flash_text
