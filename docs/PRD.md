@@ -262,9 +262,9 @@ TextStim(win=win, text=text_string, font='Courier New',
 | Param | Key | Increment | Default | Range |
 |-------|-----|-----------|---------|-------|
 | Preset string | `[B/N]` | cycle fwd/back | `ABCDEF` | see below |
-| Red | `[R/T]` | ±0.001 | 0.0 | -1.0–1.0 |
-| Green | `[E/W]` | ±0.001 | 0.0 | -1.0–1.0 |
-| Blue | `[D/A]` | ±0.001 | 0.0 | -1.0–1.0 |
+| Red | `[R/T]` | ±0.001 | 1.0 | -1.0–1.0 |
+| Green | `[E/W]` | ±0.001 | 1.0 | -1.0–1.0 |
+| Blue | `[D/A]` | ±0.001 | 1.0 | -1.0–1.0 |
 | Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 |
 
 Colour uses the uniform patch's bindings unchanged. String cycling takes its own `[B]`/`[N]` rather than overloading `[R/T]`, so no key means two things.
@@ -273,11 +273,13 @@ Preset strings: `ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO`. A custom strin
 
 PsychoPy's `TextStim` has **no `letterSpacing` parameter**, so there is no letter-spacing knob.
 
-**Readout line 5:** `Text: 'ABCDEF' | R: 0.000 | G: 0.000 | B: 0.000 | Alpha: 1.000`
+**Readout line 5:** `Text: 'ABCDEF' | R: 1.000 | G: 1.000 | B: 1.000 | Alpha: 1.000`
 
-**Stimulus-specific snapshot fields:** `{"text_string": "ABCDEF", "font": "Courier New", "alpha": 1.0, "r": 0.0, "g": 0.0, "b": 0.0}`
+**Stimulus-specific snapshot fields:** `{"text_string": "ABCDEF", "font": "Courier New", "alpha": 1.0, "r": 1.0, "g": 1.0, "b": 1.0}`
 
-Note the colour defaults are all 0.0, which is mid-gray — the same value as the default background, so at defaults the glyphs are invisible. Drive the channels up or the background down before expecting to see anything. The uniform patch (§4.4) behaves the same way for the same reason.
+**Colour defaults to white (1.0) for this type only.** rgb 0.0 is the same mid-gray as the default background, which rendered the glyphs invisible at launch. The uniform patch (§4.4) keeps 0.0, because there mid-gray is the calibration starting point the patch is meant to be driven away from. The default is chosen in `default_state()` from the stimulus type, so state, readout and snapshot never disagree with what is on screen.
+
+One consequence: spatial uniformity mode (§6.4) draws the uniform patch from the same `r`/`g`/`b` state, so in a **text** session that patch starts white rather than mid-gray. The snapshot records `patch_r/g/b/alpha`, so the reading is still self-describing.
 
 ---
 

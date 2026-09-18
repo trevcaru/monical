@@ -543,6 +543,11 @@ def apply_knob(state, key, table):
 
 def default_state(stimulus_type):
     """Every adjustable parameter in one dict, at its PRD default."""
+    # Text starts white so the glyphs are visible at launch; rgb 0.0 is the
+    # same mid-gray as the default background, which rendered them invisible.
+    # The uniform patch keeps 0.0 -- there, mid-gray IS the calibration
+    # starting point (PRD 4.4), and the patch is meant to be driven from it.
+    channel_default = 1.0 if stimulus_type == STIM_TEXT else 0.0
     return {
         # Universal (PRD 5)
         'x_pos': 0.66,
@@ -572,9 +577,9 @@ def default_state(stimulus_type):
         'envelope_sd': 0.06,
 
         # Uniform patch (PRD 4.4)
-        'r': 0.0,
-        'g': 0.0,
-        'b': 0.0,
+        'r': channel_default,
+        'g': channel_default,
+        'b': channel_default,
         'alpha': 1.0,
 
         # Custom PNG (PRD 4.5). Resolved at startup; GENERATED_LABEL when the
@@ -1264,13 +1269,34 @@ def timestamp_slug(when=None):
 
 
 def session_out_path(slug):
-    """monical_<slug>.json beside the script. Fixed once, at startup."""
-    return os.path.join(OUT_DIR, OUT_NAME_FMT.format(slug))
+    """monical_<slug>.json beside the script. Fixed once, at startup.
+
+    Uniquified so two sessions launched inside the same second cannot write
+    to one file.
+    """
+    return unique_path(os.path.join(OUT_DIR, OUT_NAME_FMT.format(slug)))
 
 
 def ensure_dir(path):
     if not os.path.isdir(path):
         os.makedirs(path)
+    return path
+
+
+def unique_path(path):
+    """`path`, or path_2 / path_3 ... if it is already taken.
+
+    Filenames carry a whole-second timestamp, so two screenshots or two
+    presets saved inside the same second would otherwise land on the same
+    name and the second would silently destroy the first.
+    """
+    if not os.path.exists(path):
+        return path
+    stem, ext = os.path.splitext(path)
+    for n in range(2, 1000):
+        candidate = '{}_{}{}'.format(stem, n, ext)
+        if not os.path.exists(candidate):
+            return candidate
     return path
 
 
@@ -1303,8 +1329,8 @@ def save_screenshot(win, slug=None):
     are polled the front buffer holds the completed frame.
     """
     ensure_dir(SCREENSHOT_DIR)
-    path = os.path.join(SCREENSHOT_DIR,
-                        SCREENSHOT_NAME_FMT.format(slug or timestamp_slug()))
+    path = unique_path(os.path.join(
+        SCREENSHOT_DIR, SCREENSHOT_NAME_FMT.format(slug or timestamp_slug())))
     win.getMovieFrame()
     win.saveMovieFrames(path)
     return path
@@ -1367,8 +1393,8 @@ def preset_from_state(state):
 def save_preset(state, slug=None):
     """Write the current knobs to presets/preset_<stamp>.json."""
     ensure_dir(PRESET_DIR)
-    path = os.path.join(PRESET_DIR,
-                        PRESET_NAME_FMT.format(slug or timestamp_slug()))
+    path = unique_path(os.path.join(
+        PRESET_DIR, PRESET_NAME_FMT.format(slug or timestamp_slug())))
     with open(path, 'w') as handle:
         json.dump(preset_from_state(state), handle, indent=2, sort_keys=True)
     return path
