@@ -20,7 +20,7 @@ python monical.py --image assets/texture.png
 python monical.py --preset presets/preset_2026-09-18_143201.json
 ```
 
-Pick a stimulus type with `1`–`5`, press `SPACE`. No config files, no build step. Each session writes its own `monical_YYYY-MM-DD_HHMMSS.json` beside the script.
+Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build step. Each session writes its own `monical_YYYY-MM-DD_HHMMSS.json` beside the script.
 
 ## Stimulus types
 
@@ -30,7 +30,7 @@ Pick a stimulus type with `1`–`5`, press `SPACE`. No config files, no build st
 | ![Radial checkerboard](docs/img/radial_checkerboard.png) | ![Gabor patch](docs/img/gabor.png) |
 | **Sinusoidal grating** — the same carrier, no envelope. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha (shown: green channel isolated). |
 | ![Sinusoidal grating](docs/img/grating.png) | ![Uniform patch](docs/img/uniform.png) |
-| **Custom PNG** — your own texture via `--image`. Without it, this generated 8×8 checkerboard. | |
+| **Custom PNG** — your own texture via `--image`. Without it, this generated 8×8 checkerboard. | **Text / letter string** — monospaced strings for legibility and acuity checks. Cycle presets with `B`/`N`, or pass `--text`. |
 | ![Custom PNG fallback](docs/img/custom_png.png) | |
 
 ## Modes
@@ -53,6 +53,8 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `S` / `Q` | snapshot / quit and save |
 | `P` / `F12` | save preset / save screenshot PNG |
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |
+| `0` | show/hide the readout (stimulus keeps rendering) |
+| `B`/`N` | text type only: cycle preset strings |
 
 Position, background, contrast and the color channels auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).
 
@@ -60,7 +62,7 @@ Position, background, contrast and the color channels auto-repeat at ~60/s after
 
 ![HUD readout](docs/img/hud_example.png)
 
-Five lines, updated every frame: measured refresh with frame-interval σ and a dropped-frame counter, mode, geometry in degrees, luminance and realized flicker rate, then the active stimulus parameters.
+Five lines, updated every frame: measured refresh with frame-interval σ and a dropped-frame counter, mode and output filename, geometry in both degrees and pixels, luminance and realized flicker rate with its duty cycle, then the active stimulus parameters. `0` hides it.
 
 The refresh figure is a rolling 120-frame average of real flip-to-flip intervals, not the startup measurement — if the two disagree by more than 5 Hz the tool says so, because every flicker frame count depends on getting it right.
 

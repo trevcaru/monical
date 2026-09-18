@@ -20,7 +20,7 @@ Monical does not run experiments, collect data, or apply corrections automatical
 - **PsychoPy** (required) — stimulus rendering, frame timing, window management. Every vision science lab using Python already has this.
 - **psychopy_visionscience** (optional, guarded import) — needed only for the radial checkerboard stimulus. All other modes work without it. Failure reported on the info screen with the pip install command.
 - **NumPy** (comes with PsychoPy)
-- **argparse** (stdlib) — used for the `--image` and `--preset` flags only.
+- **argparse** (stdlib) — used for the `--image`, `--preset` and `--text` flags only.
 - No other dependencies.
 
 ---
@@ -230,7 +230,7 @@ ImageStim(win=win, image=filepath, size=size,
 python monical.py --image assets/texture.png
 ```
 
-If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §12.
+If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §13.
 
 The path is stored in state and written to snapshots for reproducibility. If the file doesn't exist at runtime, print an error and fall back to the generated pattern.
 
@@ -243,6 +243,37 @@ The path is stored in state and written to snapshots for reproducibility. If the
 All universal parameters apply: position, size, contrast, background, flicker, viewing distance.
 
 **Stimulus-specific snapshot fields:** `{"filepath": "...", "alpha": 1.0}`
+
+### 4.6 Text stimulus
+
+Letter strings for legibility, acuity and text-rendering checks. Monospaced so glyph width is uniform and letter height maps predictably onto the size knob.
+
+**Construction:**
+```python
+TextStim(win=win, text=text_string, font='Courier New',
+         height=size, color=[r, g, b], opacity=alpha,
+         contrast=contrast, pos=(x, y), autoLog=False)
+```
+
+`height` is the universal size knob, so the degrees on readout line 3 describe the letter height.
+
+**Stimulus-specific parameters:**
+
+| Param | Key | Increment | Default | Range |
+|-------|-----|-----------|---------|-------|
+| Preset string | `[B/N]` | cycle fwd/back | `ABCDEF` | see below |
+| Red | `[R/T]` | ±0.001 | 0.0 | -1.0–1.0 |
+| Green | `[E/W]` | ±0.001 | 0.0 | -1.0–1.0 |
+| Blue | `[D/A]` | ±0.001 | 0.0 | -1.0–1.0 |
+| Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 |
+
+Colour uses the uniform patch's bindings unchanged. String cycling takes its own `[B]`/`[N]` rather than overloading `[R/T]`, so no key means two things.
+
+Preset strings: `ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO`. A custom string is supplied with `--text "MYSTRING"`, which appends it to the cycle and selects it at startup — Monical has no on-screen text entry, and adding one would need a widget (§13).
+
+PsychoPy's `TextStim` has **no `letterSpacing` parameter**, so there is no letter-spacing knob.
+
+**Stimulus-specific snapshot fields:** `{"text_string": "ABCDEF", "font": "Courier New", "alpha": 1.0, "r": 0.0, "g": 0.0, "b": 0.0}`
 
 ---
 
@@ -379,9 +410,27 @@ Bottom center, small monospace text, updates every frame. Adapts to the current 
 Line 1: [resolution] | [refresh Hz avg] | PsychoPy [ver] | Dist: [cm] cm
 Line 2: Mode: [name] | Stim: [type]
 Line 3: X: [val] | Y: [val] | Size: [val] ([deg]°) | Ecc: [deg]°
-Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] frames)
+Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] frames, [duty]% duty)
 Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
 ```
+
+Duty cycle is `(frames // 2) / frames`, the same split `stim_is_on` uses. Only an even frame count can give 50%; an odd one puts the shorter half ON, so 3 frames reads `33% duty`. In a non-flicker mode the field is marked `idle` and shows what the standing custom setting would produce.
+
+Line 3 carries pixel coordinates beside the height units, derived from the window:
+
+```
+px_x = int(x_pos * win_height + win_width / 2)
+px_y = int(y_pos * win_height + win_height / 2)
+px_size = int(size * win_height)
+```
+
+Height units scale by screen HEIGHT on both axes, so both coordinates use `win_height`; only the origin offset differs. Note `px_y` grows downward while PsychoPy's `+y` is up, so a positive `y_pos` reports a pixel row below centre. Degrees need the monitor's physical size and read `--` without it; pixels only need the window, so they are always available.
+
+Line 2 ends with the session's output filename.
+
+### 8.1 Hiding the readout
+
+`[H]` is already custom-frequency-down (§5), so the HUD toggle is **`[0]`**. It hides *only* the readout text — stimulus, fixation cross and the gamma patch all keep rendering. For photometer readings and screenshots with no text overlay. Default visible; tracked as `hud_visible`.
 
 Line 5 for `custom_png` shows:
 
@@ -414,11 +463,12 @@ SELECT STIMULUS TYPE:
   [3] Sinusoidal grating (contrast/SF tuning)
   [4] Uniform patch (color/luminance calibration)
   [5] Custom PNG (your own texture)
+  [6] Text / letter string
 ```
 
 **Section 3 — Workflow tutorial (adapts to selection):**
 
-Shows the recommended calibration workflow and the keybindings relevant to the selected stimulus type. Updates live as the user presses 1–5.
+Shows the recommended calibration workflow and the keybindings relevant to the selected stimulus type. Updates live as the user presses 1–6.
 
 Custom PNG workflow block:
 
@@ -466,7 +516,24 @@ For documenting a configuration visually, or capturing an on-screen readout to p
 
 ---
 
-## 12. What Monical is not
+## 12. Monitor dimension warning
+
+Every visual angle derives from the Monitor object's physical size, which PsychoPy takes from its stored width — not from the display. A stale or default value produces angles that look plausible and are wrong.
+
+At startup the derived screen height is checked. Outside **15–80 cm**, or absent entirely, the intro screen shows a yellow warning and the console prints the same line:
+
+```
+WARNING: monitor height 12.6 cm looks wrong. Set physical dimensions in
+PsychoPy Monitor Center. Visual angles will be incorrect.
+```
+
+It does not block. The session runs; the angles are simply not to be trusted until the Monitor is fixed.
+
+The session JSON records `"monitor_dimension_warning": true/false`, so a reader can tell whether the angles in a file were taken under a suspect geometry. An absent height sets the flag too: unavailable angles and confidently wrong ones both warrant the warning, and the second is worse.
+
+---
+
+## 13. What Monical is not
 
 - Not an experiment. No EEG, eye tracking, trials, conditions, CSV data.
 - Not a monitor profiler. It doesn't build or apply gamma tables — PsychoPy Monitor Center does that. Monical helps you collect the measurements.
@@ -476,13 +543,13 @@ For documenting a configuration visually, or capturing an on-screen readout to p
 
 ---
 
-## 13. Provenance
+## 14. Provenance
 
 Seed file: `tools/test_stimulus.py` from the Odegaard Lab covert/overt SSVEP experiment repo (`covert_overt_2_stim`). The radial checkerboard construction, flicker logic, and JSON snapshot format originate there. Monical generalizes the tool to arbitrary stimulus types and adds color calibration, visual angle computation, spatial uniformity checking, and multi-stimulus verification.
 
 ---
 
-## 14. Open questions
+## 15. Open questions
 
 1. **Key bindings for stimulus-specific params.** The current mapping reuses R/T, E/W, D/A, Z/X across stimulus types with different meanings. This is compact but potentially confusing. Alternative: use a consistent semantic mapping and show a legend. Decide during implementation.
 
