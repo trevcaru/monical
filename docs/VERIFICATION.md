@@ -212,13 +212,21 @@ phase offset on the scope trace.
 
 ## Recording Results
 
-Every `S` press writes the current state to `calibration_values.json`. A
+Every `S` press writes the current state to this session's output file,
+`monical_YYYY-MM-DD_HHMMSS.json`, named at startup and shown on the intro
+screen. A
 complete verification session should produce ~40–60 snapshots covering all the
 checks above. The JSON is the record — take snapshots in a consistent order,
 since the file records the sequence with timestamps and `snapshot_number`.
 
-**The file is overwritten on every run.** Copy it out before starting a second
-session, and rename it per verification run.
+**Each run gets its own file**, so an earlier verification is never destroyed
+by a later one. The filename carries the start time; note which file belongs to
+which run.
+
+For the gamma section, `A` runs the 11-level ramp automatically at 2 s per
+level and snapshots each one — see MANUAL workflow (g). `P` saves the current
+knobs as a preset so a verified configuration can be restored with `--preset`,
+and `F12` captures the screen to `screenshots/`.
 
 Each snapshot also carries `rolling_refresh_hz` and `dropped_frames_total` at
 the moment it was taken, so you can tell afterwards whether timing was healthy

@@ -17,9 +17,10 @@ pip install psychopy-visionscience
 ```bash
 python monical.py
 python monical.py --image assets/texture.png
+python monical.py --preset presets/preset_2026-09-18_143201.json
 ```
 
-Pick a stimulus type with `1`–`5`, press `SPACE`. No config files, no build step. Writes one file, `calibration_values.json`, beside the script.
+Pick a stimulus type with `1`–`5`, press `SPACE`. No config files, no build step. Each session writes its own `monical_YYYY-MM-DD_HHMMSS.json` beside the script.
 
 ## Stimulus types
 
@@ -50,6 +51,8 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `;`/`'` | viewing distance ±1 cm |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
 | `S` / `Q` | snapshot / quit and save |
+| `P` / `F12` | save preset / save screenshot PNG |
+| `A` | gamma mode only: automatic 11-level sweep, 2 s per level |
 
 Position, background, contrast and the color channels auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).
 
@@ -63,7 +66,7 @@ The refresh figure is a rolling 120-frame average of real flip-to-flip intervals
 
 ## Output
 
-`calibration_values.json`, rewritten on every snapshot and on quit. **Overwritten each run** — copy it out between sessions.
+`monical_YYYY-MM-DD_HHMMSS.json`, rewritten on every snapshot and on quit. One file per session — nothing is ever overwritten.
 
 ```json
 {
@@ -142,8 +145,9 @@ Nothing reads this file back. You transcribe the values into your experiment by 
 
 ## Documentation
 
-- [docs/MANUAL.md](docs/MANUAL.md) — operating manual: full keybindings, five step-by-step calibration workflows, output reference, troubleshooting.
+- [docs/MANUAL.md](docs/MANUAL.md) — operating manual: full keybindings, seven step-by-step calibration workflows, output reference, troubleshooting.
 - [docs/PRD.md](docs/PRD.md) — design authority: what each stimulus is, why, and the exact construction.
+- [docs/VERIFICATION.md](docs/VERIFICATION.md) — verification protocol: confirm the readout and JSON match what the display is physically doing.
 
 ## What it is not
 
