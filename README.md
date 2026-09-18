@@ -47,13 +47,13 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `PAGEUP`/`PAGEDN` | background gray ±0.001 |
 | `+`/`-` | size ±0.01 |
 | `C`/`V` | contrast ±0.001 |
-| `F`/`H` | custom frequency ±1 Hz |
+| `F`/`J` | custom frequency ±1 Hz |
 | `;`/`'` | viewing distance ±1 cm |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
 | `S` / `Q` | snapshot / quit and save |
 | `P` / `F12` | save preset / save screenshot PNG |
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |
-| `0` | show/hide the readout (stimulus keeps rendering) |
+| `H` | show/hide the readout (stimulus keeps rendering) |
 | `B`/`N` | text type only: cycle preset strings |
 
 Position, background, contrast and the color channels auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).

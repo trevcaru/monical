@@ -288,7 +288,7 @@ Active in all stimulus modes.
 | Background gray | `[PAGEUP/PAGEDN]` | ±0.001 | 0.000 | -1.0–1.0 |
 | Disc/patch size | `[+/-]` | ±0.01 | 0.225 | 0.01–2.0 |
 | Contrast | `[C/V]` | ±0.001 | 1.000 | 0.0–1.0 |
-| Custom frequency | `[F/H]` | ±1 Hz | 15 | 1–120 |
+| Custom frequency | `[F/J]` | ±1 Hz | 15 | 1–120 |
 | Viewing distance | `[;/']` | ±1 cm | 40 | 1–500 |
 
 Arrows move the stimulus; the page keys adjust the background behind it.
@@ -430,7 +430,9 @@ Line 2 ends with the session's output filename.
 
 ### 8.1 Hiding the readout
 
-`[H]` is already custom-frequency-down (§5), so the HUD toggle is **`[0]`**. It hides *only* the readout text — stimulus, fixation cross and the gamma patch all keep rendering. For photometer readings and screenshots with no text overlay. Default visible; tracked as `hud_visible`.
+**`[H]`** toggles the readout. It hides *only* the multi-line readout text — stimulus, fixation cross and the gamma patch all keep rendering. For photometer readings and screenshots with no text overlay. Default visible; tracked as `hud_visible`.
+
+Custom-frequency-down moved from `[H]` to `[J]` to free the key, so the frequency pair is `[F/J]` (§5).
 
 Line 5 for `custom_png` shows:
 
