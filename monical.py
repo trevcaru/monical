@@ -113,7 +113,7 @@ STIMULUS_LABELS = {
     STIM_GRATING: 'Sinusoidal grating (contrast/SF tuning)',
     STIM_UNIFORM: 'Uniform patch (color/luminance calibration)',
     STIM_CUSTOM_PNG: 'Custom PNG (your own texture)',
-    STIM_TEXT: 'Text / letter string',
+    STIM_TEXT: 'Text / letter string (reading/crowding)',
 }
 
 # PRD 4.6. Monospaced so glyph width is uniform and letter height maps
