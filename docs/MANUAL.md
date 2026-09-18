@@ -105,7 +105,7 @@ until you fix the width in PsychoPy Monitor Center (§8).
 | Background gray | `PAGEUP` / `PAGEDN` | ±0.001 | −1.0 to 1.0 | hold |
 | Size | `+` / `-` | ±0.01 | 0.01 to 2.0 | single press |
 | Contrast | `C` / `V` | ±0.001 | 0.0 to 1.0 | hold |
-| Custom frequency | `F` / `H` | ±1 Hz | 1 to 120 | single press |
+| Custom frequency | `F` / `J` | ±1 Hz | 1 to 120 | single press |
 | Viewing distance | `;` / `'` | ±1 cm | 1 to 500 | single press |
 
 Arrows move the stimulus; the page keys adjust the background behind it. The
@@ -148,14 +148,14 @@ mode key replaces the current mode.
 | `P` | Save the current knobs as a preset in `presets/`. Confirms with the filename. |
 | `F12` | Save a PNG of the current frame to `screenshots/`. Confirms with the filename. |
 | `A` | Gamma mode only: start or cancel the auto sweep (§5g). |
-| `0` | Show/hide the readout. Stimulus and fixation keep rendering. |
+| `H` | Show/hide the readout. Stimulus and fixation keep rendering. |
 | `B` / `N` | Text type only: cycle preset strings forward/back. |
 | `Q` or `ESC` | Write final state plus all snapshots, then exit. |
 
 While an auto gamma sweep is running, `ESC` cancels the sweep instead of
 quitting — a mistimed press cannot end the session mid-ramp.
 
-**The HUD toggle is `0`, not `H`** — `H` is custom-frequency-down. Hiding the
+**The HUD toggle is `H`.** Custom-frequency-down is `J`, not `H`. Hiding the
 readout hides only the text; the stimulus, fixation cross and gamma patch all
 keep drawing, which is what you want for an unobstructed photometer reading or
 a clean screenshot.
@@ -291,7 +291,7 @@ Produces the 11 points you enter into PsychoPy Monitor Center.
 2. Press `3` (15 Hz) or `4` (20 Hz). **Read the realized frequency from HUD
    line 4, not the mode name.** It shows `Freq: 15.00 Hz (16 frames, 50%
    duty)` — frames per cycle, and the ON share of that cycle.
-3. For any other rate, set it with `F` / `H` and press `5`.
+3. For any other rate, set it with `F` / `J` and press `5`.
 4. Confirm the scope trace matches the realized Hz and that the duty cycle is
    symmetric.
 
@@ -387,7 +387,7 @@ long enough for your probe to settle, step manually with `S` instead.
    dominates and the measurement is about the renderer, not the observer.
 4. Step contrast with `C` / `V` for a legibility threshold, snapshotting
    with `S` at each step.
-5. Press `0` to hide the readout before judging legibility, so HUD text is
+5. Press `H` to hide the readout before judging legibility, so HUD text is
    not in the observer's field.
 
 ---
@@ -501,7 +501,7 @@ Five lines, bottom center, updated every frame.
 ```
 1920x1080 | 239.94 Hz (σ=0.12ms) | Drops: 0 | PsychoPy 2026.2.2 | Dist: 40 cm
 Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
-X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (10.61 deg, 243px) | Ecc: 28.57 deg
+X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (243px, 10.61 deg) | Ecc: 28.57 deg
 BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 frames, 50% duty, idle)
 SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
 ```

@@ -241,7 +241,7 @@ def fallback_checker(px=416):
 HUD_TEXT = u"""\
 1920x1080 | 239.94 Hz (σ=0.12ms) | Drops: 0 | PsychoPy 2026.2.2 | Dist: 40 cm
 Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
-X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (10.61 deg, 243px) | Ecc: 28.57 deg
+X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (243px, 10.61 deg) | Ecc: 28.57 deg
 BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 frames, 50% duty, idle)
 SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)"""
 

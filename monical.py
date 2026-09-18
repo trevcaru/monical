@@ -129,9 +129,9 @@ TEXT_CYCLE_BACK = 'n'
 MONITOR_H_MIN_CM = 15.0
 MONITOR_H_MAX_CM = 80.0
 
-# [H] is already custom-frequency-down (PRD 5), so the HUD toggle takes a
-# free key rather than displacing a documented knob.
-HUD_TOGGLE_KEY = '0'
+# [H] toggles the readout. Custom-frequency-down moved from [H] to [J] to
+# free it (PRD 5).
+HUD_TOGGLE_KEY = 'h'
 
 FIXATION_SIZE = (0.07, 0.07)      # experiment FIXATION_SIZE, from the seed
 
@@ -234,8 +234,10 @@ KNOBS = {
     'num_subtract': ('size', -STEP_SIZE, 0.01, 2.0, 'float'),
     'c':            ('contrast', +STEP_CONTRAST, 0.0, 1.0, 'float'),
     'v':            ('contrast', -STEP_CONTRAST, 0.0, 1.0, 'float'),
+    # [F/J], not the original [F/H]: [H] now toggles the readout, and F and J
+    # are the two home-position index keys.
     'f':            ('custom_freq_hz', +STEP_FREQ, 1, 120, 'int'),
-    'h':            ('custom_freq_hz', -STEP_FREQ, 1, 120, 'int'),
+    'j':            ('custom_freq_hz', -STEP_FREQ, 1, 120, 'int'),
     'semicolon':    ('viewing_distance_cm', +STEP_DISTANCE, 1, 500, 'int'),
     'apostrophe':   ('viewing_distance_cm', -STEP_DISTANCE, 1, 500, 'int'),
 }
@@ -1016,10 +1018,10 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
                             else ' | Out: {}'.format(out_name)),
         # Degrees need the monitor's physical size and go '--' without it;
         # pixels only need the window, so they are always available.
-        'X: {:.2f} ({}px) | Y: {:.2f} ({}px) | Size: {:.2f} ({} deg, {}px) '
+        'X: {:.2f} ({}px) | Y: {:.2f} ({}px) | Size: {:.2f} ({}px, {} deg) '
         '| Ecc: {} deg'.format(
             state['x_pos'], px_x, state['y_pos'], px_y, state['size'],
-            _deg(size_deg), px_size, _deg(ecc_deg)),
+            px_size, _deg(size_deg), _deg(ecc_deg)),
         'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
             state['bg_gray'], state['contrast'], freq_text),
         stim_line(state, sweep),

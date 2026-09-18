@@ -43,7 +43,7 @@ c) Read the oscilloscope. Measure the period and compute frequency.
 d) Compare against the HUD's realized Hz (line 4) and the JSON's
    `flicker_realized_hz`.
 e) Repeat for mode `4` (20 Hz) and mode `5` with at least three custom values
-   (e.g. 6, 10, 30 Hz). Set the custom rate with `F` / `H` before pressing `5`.
+   (e.g. 6, 10, 30 Hz). Set the custom rate with `F` / `J` before pressing `5`.
 f) Check duty cycle, which the readout states directly. At 240 Hz all modes
    read `50% duty`. At 60 Hz the 20 Hz mode reads `33% duty` — 1 frame on,
    2 off — because 60/20 = 3 frames and the on-half is `frames // 2`.
