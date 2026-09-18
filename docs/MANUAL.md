@@ -220,12 +220,13 @@ legend is always on HUD line 5.
 | Param | Keys | Step | Default | Range | Repeat |
 |---|---|---|---|---|---|
 | Preset string | `B` / `N` | cycle | `ABCDEF` | 5 presets + `--text` |  |
-| Red | `R` / `T` | ±0.001 | 0.0 | −1.0–1.0 | hold |
-| Green | `E` / `W` | ±0.001 | 0.0 | −1.0–1.0 | hold |
-| Blue | `D` / `A` | ±0.001 | 0.0 | −1.0–1.0 | hold |
+| Red | `R` / `T` | ±0.001 | 1.0 | −1.0–1.0 | hold |
+| Green | `E` / `W` | ±0.001 | 1.0 | −1.0–1.0 | hold |
+| Blue | `D` / `A` | ±0.001 | 1.0 | −1.0–1.0 | hold |
 | Alpha | `Z` / `X` | ±0.01 | 1.0 | 0.0–1.0 | single press |
 
-Colour uses the same keys as the uniform patch. Presets are `ABCDEF`,
+Colour uses the same keys as the uniform patch, but defaults to **white** here
+so the glyphs show at launch. Presets are `ABCDEF`,
 `abcdef`, `123456`, `XXXXXX`, `oOoOoO`. The universal size knob sets letter
 height, so the degrees on line 3 describe the letters. PsychoPy's `TextStim`
 has no letter-spacing parameter, so there is no spacing knob.
@@ -313,6 +314,9 @@ and symmetric. At 60 Hz the grid is coarse and odd counts are asymmetric:
 2. Set the patch color with `R`/`T`, `E`/`W`, `D`/`A` and its size with
    `+`/`-` before you start moving it — resizing changes the grid coordinates,
    because corner cells sit as far out as the patch fits without clipping.
+
+   The channels start at 0.000 (mid-gray) in every session except a **text**
+   session, where they start at 1.0. Check readout line 5.
 3. Arrow keys move between the nine cells. HUD line 2 names the cell and gives
    its coordinates.
 4. Photometer each cell, press `S` at each. Snapshots record
@@ -387,9 +391,9 @@ long enough for your probe to settle, step manually with `S` instead.
 2. Cycle to the string you want with `B` / `N`, or start with
    `--text "MYSTRING"`.
 
-   **The glyphs are invisible at defaults.** Text colour starts at
-   R=G=B=0.000, which is the same mid-gray as the background. Drive a channel
-   up with `R`/`E`/`D` or take the background down with `PAGEDN` first.
+   Text colour starts at **white** (R=G=B=1.000) so the glyphs are visible
+   at launch. Drive the channels down with `T`/`W`/`A` for a coloured or
+   darker string. The uniform patch still starts at mid-gray 0.000.
 3. Set the size knob until line 3 reports the letter height you need in
    degrees. The pixel figure beside it tells you whether the glyphs have
    enough pixels to be rendered faithfully — below ~10 px tall, antialiasing

@@ -175,8 +175,9 @@ against its own formula.
 ## 6. Spatial Uniformity
 
 a) Enter mode `8`. Set the uniform patch to mid-gray (R = G = B = 0,
-   alpha = 1 — these are the defaults, so no adjustment is needed unless you
-   changed them).
+   alpha = 1). Those are the defaults in every session except a **text**
+   session, where the channels start at 1.0 — confirm on readout line 5 and
+   take them down with `T`/`W`/`A` if needed.
 b) Step through all 9 grid positions with the arrow keys. Snapshot and record
    the photometer reading at each.
 c) Compute the max/min ratio across all 9 positions.

@@ -45,9 +45,8 @@ PSYCHOPY_GRAY = 0.5
 UNIFORM_BG = 0.25
 UNIFORM_RGB = (0.0, 0.7, 0.0)             # PsychoPy signed rgb, -1..+1
 TEXT_BG = 0.0                             # intro and HUD are white on black
-# The text stimulus defaults to rgb 0.0 -- mid-gray on a mid-gray ground, so
-# at defaults it is genuinely invisible, exactly like the uniform patch. The
-# preview drives it white so the glyphs read.
+# Matches monical's default for this type: text starts white (rgb 1.0), unlike
+# the uniform patch which starts at mid-gray 0.0.
 TEXT_STIM_RGB = (1.0, 1.0, 1.0)
 TEXT_STIM_STRING = 'ABCDEF'
 
