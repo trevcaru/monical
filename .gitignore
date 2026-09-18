@@ -1,5 +1,10 @@
 # Per-session rig data. Reference only, regenerated every run.
+monical_*.json
 calibration_values.json
+
+# Saved knob presets and captured frames.
+presets/
+screenshots/
 
 # Python bytecode
 __pycache__/

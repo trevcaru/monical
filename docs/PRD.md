@@ -20,7 +20,7 @@ Monical does not run experiments, collect data, or apply corrections automatical
 - **PsychoPy** (required) — stimulus rendering, frame timing, window management. Every vision science lab using Python already has this.
 - **psychopy_visionscience** (optional, guarded import) — needed only for the radial checkerboard stimulus. All other modes work without it. Failure reported on the info screen with the pip install command.
 - **NumPy** (comes with PsychoPy)
-- **argparse** (stdlib) — used for the `--image` flag only.
+- **argparse** (stdlib) — used for the `--image` and `--preset` flags only.
 - No other dependencies.
 
 ---
@@ -39,6 +39,12 @@ With a custom PNG texture for stimulus type `[5]` (see §4.5):
 python monical.py --image assets/texture.png
 ```
 
+Restoring saved knob settings (see §10):
+
+```
+python monical.py --preset presets/preset_2026-09-18_143201.json
+```
+
 ### 3.1 Screen flow
 
 ```
@@ -55,7 +61,13 @@ python monical.py --image assets/texture.png
 
 ### 3.2 File output
 
-`calibration_values.json` — written on every `[S]` snapshot and on `[Q]` quit. Overwritten each run. Contains:
+`monical_YYYY-MM-DD_HHMMSS.json` — one file per session, named from `session_start` and written beside `monical.py`. Example: `monical_2026-09-18_143201.json`.
+
+The name is fixed once at startup and shown on the intro screen, so the operator knows where the session's measurements are going before pressing SPACE. Every `[S]` snapshot and the `[Q]` final write go to that same file, rewritten in full each time.
+
+**Nothing is ever overwritten.** A second run gets its own file; an interrupted session leaves whatever it had already written. Earlier versions wrote a single `calibration_values.json` that each run destroyed.
+
+Contains:
 
 ```json
 {
@@ -84,6 +96,8 @@ python monical.py --image assets/texture.png
   "platform": "win32",
   "has_radial_stim": true,
   "image_path": null,
+  "preset_path": null,
+  "output_file": "monical_2026-08-21_143012.json",
   "viewing_distance_cm": 40.0,
   "stimulus_type": "radial_checkerboard",
   "snapshots": [
@@ -216,7 +230,7 @@ ImageStim(win=win, image=filepath, size=size,
 python monical.py --image assets/texture.png
 ```
 
-If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §10.
+If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §12.
 
 The path is stored in state and written to snapshots for reproducibility. If the file doesn't exist at runtime, print an error and fall back to the generated pattern.
 
@@ -280,6 +294,16 @@ Toggled by number keys. Active across all stimulus types.
 | `[7]` | Dual stimulus | Two stimuli at ±X eccentricity simultaneously. Matches two-stimulus experiment layout. |
 | `[8]` | Spatial uniformity | Uniform patch movable to a 3×3 grid (center, corners, midpoints). Arrow keys move between grid positions. |
 
+Non-mode action keys, active throughout the test routine:
+
+| Key | Action |
+|-----|--------|
+| `[S]` | Snapshot to the session file |
+| `[P]` | Save the current knobs as a preset (§10) |
+| `[F12]` | Save a PNG of the current frame (§11) |
+| `[A]` | Start or cancel the auto gamma sweep, gamma mode only (§6.5) |
+| `[Q]` | Quit, writing final state |
+
 ### 6.1 Flicker logic
 
 ```python
@@ -307,6 +331,20 @@ Renders two instances of the current stimulus type at positions (x, y) and (-x, 
 
 Renders the uniform patch (regardless of selected stimulus type) at preset grid positions. Arrow keys step through: center, top-left, top-center, top-right, mid-left, mid-right, bottom-left, bottom-center, bottom-right. Snapshot at each position to characterize panel uniformity.
 
+### 6.5 Auto gamma sweep
+
+`[A]` in gamma steps runs the 11-level ramp unattended so the operator can keep both hands on the photometer.
+
+- Starts at level 1 and steps to level 11.
+- Dwells 2.0 s at each level before reading, giving the panel and the probe time to settle. The dwell is wall clock, not frame count, so it holds at 2 s on any refresh rate.
+- Takes a snapshot automatically at each level, into the session file. A completed sweep therefore adds exactly 11 snapshots.
+- The readout shows progress and the countdown: `Auto gamma: level 3/11 -- settling (1.2s)`.
+- `[A]` again or `[ESC]` cancels mid-sweep. While a sweep is running `[ESC]` cancels rather than quitting, so a mistimed press cannot end the session mid-ramp.
+- On completion or cancellation the level the operator was on before `[A]` is restored.
+
+The reading belongs to the level that has just settled, so the snapshot is taken **before** the index advances. Manual `LEFT`/`RIGHT` stepping is ignored while a sweep is running.
+
+`[A]` is an envelope-SD knob on the Gabor and a blue-channel knob on the uniform patch. Gamma mode claims it the same way it claims `LEFT`/`RIGHT`, so starting a sweep cannot also nudge a stimulus parameter underneath it.
 ---
 
 ## 7. Visual angle calculator
@@ -396,7 +434,39 @@ Press SPACE to begin.
 
 ---
 
-## 10. What Monical is not
+## 10. Presets
+
+A preset is a snapshot of the knobs, saved so a rig can be brought back to a known configuration without re-dialling every value.
+
+**Save:** `[P]` during the test routine writes `presets/preset_YYYY-MM-DD_HHMMSS.json`, creating `presets/` if needed. The readout confirms with the filename.
+
+**Load:** `--preset path/to/preset.json` applies the values before the main loop starts, and opens the intro selector on the stimulus type the preset was saved from. The operator can still change type before pressing SPACE; their choice wins.
+
+```
+python monical.py --preset presets/preset_2026-09-18_143201.json
+```
+
+A preset carries the stimulus, not the rig or the run. These keys are excluded: `frame_idx` and `snapshots` (live loop bookkeeping), `aspect` (comes from the window), and `image_path` (comes from `--image`).
+
+**Compatibility is deliberate in both directions.** Keys the preset omits keep their defaults, so a preset written by an older version still loads. Keys it carries that this version no longer recognises are ignored with a console note. Neither is an error — presets outlive tool versions.
+
+An unreadable or malformed preset prints an error and the session continues with defaults. A preset is a convenience; a broken one should cost you the preset, not the calibration session.
+
+`presets/` is gitignored.
+
+---
+
+## 11. Screenshots
+
+`[F12]` saves a PNG of the frame currently on screen to `screenshots/monical_screenshot_YYYY-MM-DD_HHMMSS.png`, creating `screenshots/` if needed. The readout confirms with the filename.
+
+Implemented with `win.getMovieFrame()` followed by `win.saveMovieFrames()`. `getMovieFrame()` reads the front buffer, which is the completed frame the operator is looking at — the loop flips at the end of each pass, so by the time keys are polled the front buffer holds it.
+
+For documenting a configuration visually, or capturing an on-screen readout to paste into lab notes. `screenshots/` is gitignored.
+
+---
+
+## 12. What Monical is not
 
 - Not an experiment. No EEG, eye tracking, trials, conditions, CSV data.
 - Not a monitor profiler. It doesn't build or apply gamma tables — PsychoPy Monitor Center does that. Monical helps you collect the measurements.
@@ -406,13 +476,13 @@ Press SPACE to begin.
 
 ---
 
-## 11. Provenance
+## 13. Provenance
 
 Seed file: `tools/test_stimulus.py` from the Odegaard Lab covert/overt SSVEP experiment repo (`covert_overt_2_stim`). The radial checkerboard construction, flicker logic, and JSON snapshot format originate there. Monical generalizes the tool to arbitrary stimulus types and adds color calibration, visual angle computation, spatial uniformity checking, and multi-stimulus verification.
 
 ---
 
-## 12. Open questions
+## 14. Open questions
 
 1. **Key bindings for stimulus-specific params.** The current mapping reuses R/T, E/W, D/A, Z/X across stimulus types with different meanings. This is compact but potentially confusing. Alternative: use a consistent semantic mapping and show a legend. Decide during implementation.
 

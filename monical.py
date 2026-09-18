@@ -78,7 +78,22 @@ DEFAULT_BG = 0.0
 READOUT_FONT = 'Consolas'
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_PATH = os.path.join(OUT_DIR, 'calibration_values.json')
+PRESET_DIR = os.path.join(OUT_DIR, 'presets')
+SCREENSHOT_DIR = os.path.join(OUT_DIR, 'screenshots')
+
+# One output file per session, named from session_start. Nothing is ever
+# overwritten, so a second run cannot destroy the first run's measurements.
+OUT_STAMP_FMT = '%Y-%m-%d_%H%M%S'
+OUT_NAME_FMT = 'monical_{}.json'
+PRESET_NAME_FMT = 'preset_{}.json'
+SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
+
+# State keys that describe the rig or the run rather than the stimulus, and so
+# are not carried in a preset. `aspect` comes from the window, `image_path`
+# from --image, and the other two are live loop bookkeeping.
+PRESET_EXCLUDE = ('frame_idx', 'snapshots', 'aspect', 'image_path')
+
+SETTLE_S = 2.0                    # auto gamma dwell per level (PRD 6.5)
 
 # Stimulus types, in intro-screen selector order [1-4].
 STIM_RADIAL = 'radial_checkerboard'
@@ -686,7 +701,8 @@ WORKFLOWS = {
 }
 
 
-def build_intro_text(resolution, refresh_hz, selected_index, image_label):
+def build_intro_text(resolution, refresh_hz, selected_index, image_label,
+                     out_name='', preset_name=''):
     plugin_line = ('psychopy_visionscience  [OK]' if HAS_RADIAL else
                    'psychopy_visionscience  [FAILED -- '
                    'pip install psychopy-visionscience]')
@@ -698,6 +714,13 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label):
             resolution[0], resolution[1], refresh_hz),
         "PsychoPy:   {}".format(PSYCHOPY_VERSION),
         "Plugin:     {}".format(plugin_line),
+        # Where the session's measurements are going. Shown here because the
+        # name is fixed at startup and never changes during the run.
+        "Output:     {}".format(out_name),
+    ]
+    if preset_name:
+        lines.append("Preset:     {}".format(preset_name[-49:]))
+    lines += [
         "",
         "SELECT STIMULUS TYPE:",
     ]
@@ -727,15 +750,21 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label):
         "MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz",
         "       [5] custom Hz  [G] gamma steps  [8] spatial uniformity",
         "       [7] toggles DUAL (two copies at +/-X, same flicker)",
-        "[S] snapshot   [Q] quit (saves final state)",
+        "[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma",
+        "[Q] quit (saves final state)",
         "",
         "Press SPACE to begin.",
     ]
     return "\n".join(lines)
 
 
-def show_intro(win, resolution, refresh_hz, image_label):
-    """White on black. Returns the chosen stimulus type, or None if aborted."""
+def show_intro(win, resolution, refresh_hz, image_label, out_name='',
+               preset_name='', selected_index=0):
+    """White on black. Returns the chosen stimulus type, or None if aborted.
+
+    `selected_index` preselects a type -- a loaded preset opens on the type it
+    was saved from, though the operator can still change it before SPACE.
+    """
     previous_color = win.color
     win.color = [-1, -1, -1]
     # Window colour needs a flip to take; two clears the FBO's stale buffer.
@@ -743,10 +772,10 @@ def show_intro(win, resolution, refresh_hz, image_label):
     win.flip()
 
     select_keys = [str(i + 1) for i in range(len(STIMULUS_TYPES))]
-    selected_index = 0
+    selected_index = int(clamp(selected_index, 0, len(STIMULUS_TYPES) - 1))
     text = visual.TextStim(
         win, text=build_intro_text(resolution, refresh_hz, selected_index,
-                                   image_label),
+                                   image_label, out_name, preset_name),
         font=READOUT_FONT, height=0.020, color='white',
         pos=(0, 0), wrapWidth=1.7, alignText='left', anchorHoriz='center',
         autoLog=False)
@@ -772,7 +801,8 @@ def show_intro(win, resolution, refresh_hz, image_label):
 
         if dirty:
             text.text = build_intro_text(
-                resolution, refresh_hz, selected_index, image_label)
+                resolution, refresh_hz, selected_index, image_label,
+                out_name, preset_name)
 
 
 # =============================================================================
@@ -804,10 +834,16 @@ def mode_line(state):
     return ' | '.join(parts)
 
 
-def stim_line(state):
+def stim_line(state, sweep=None):
     """HUD line 5. Adapts to the stimulus type (PRD 8)."""
     if state['mode'] == MODE_GAMMA:
-        return 'Gamma steps: LEFT/RIGHT to change level | fixation hidden'
+        if sweep is not None:
+            return ('Auto gamma: level {}/{} -- settling ({:.1f}s) | '
+                    '[A] or [ESC] cancels'.format(
+                        state['gamma_step_index'] + 1, len(GAMMA_LEVELS),
+                        max(0.0, sweep['remaining'])))
+        return ('Gamma steps: LEFT/RIGHT to change level | [A] auto sweep | '
+                'fixation hidden')
     if state['mode'] == MODE_UNIFORMITY:
         return ('Spatial uniformity: ARROWS move the patch across the 3x3 '
                 'grid | fixation hidden')
@@ -831,7 +867,7 @@ def stim_line(state):
 
 
 def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
-              sd_ms=None, drops=0):
+              sd_ms=None, drops=0, sweep=None):
     """The five lines of PRD 8, rebuilt every frame."""
     size_deg = visual_angle_deg(state['size'], screen_height_cm,
                                 state['viewing_distance_cm'])
@@ -867,7 +903,7 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
             _deg(size_deg), _deg(ecc_deg)),
         'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
             state['bg_gray'], state['contrast'], freq_text),
-        stim_line(state),
+        stim_line(state, sweep),
     ])
 
 
@@ -966,7 +1002,7 @@ def state_record(state, screen_height_cm, refresh_hz=None,
 
 
 def session_header(win, mon, resolution, screen_height_cm, startup_hz,
-                   image_arg):
+                   image_arg, started=None, out_path=None, preset_arg=None):
     """Everything about the rig that does not change during the session.
 
     Captured once, at startup, so a reader months later can tell what the
@@ -980,7 +1016,8 @@ def session_header(win, mon, resolution, screen_height_cm, startup_hz,
         width_cm = None
     vsync_on, vsync_info = vsync_state(win)
     return {
-        'session_start': datetime.datetime.now().isoformat(timespec='seconds'),
+        'session_start': (started or datetime.datetime.now()).isoformat(
+            timespec='seconds'),
         'session_end': None,
         'monical_version': MONICAL_VERSION,
         'monitor_name': MONITOR_NAME,
@@ -1006,11 +1043,35 @@ def session_header(win, mon, resolution, screen_height_cm, startup_hz,
         'platform': sys.platform,
         'has_radial_stim': bool(HAS_RADIAL),
         'image_path': image_arg,
+        'preset_path': preset_arg,
+        # The file these values are being written to, recorded inside the file
+        # so a renamed copy still says where it came from.
+        'output_file': None if out_path is None else os.path.basename(out_path),
     }
 
 
-def write_json(state, session, final=None):
-    """Rewritten in full on every [S] and on [Q]. Overwritten each run."""
+def timestamp_slug(when=None):
+    """YYYY-MM-DD_HHMMSS, the stem every generated filename is built from."""
+    return (when or datetime.datetime.now()).strftime(OUT_STAMP_FMT)
+
+
+def session_out_path(slug):
+    """monical_<slug>.json beside the script. Fixed once, at startup."""
+    return os.path.join(OUT_DIR, OUT_NAME_FMT.format(slug))
+
+
+def ensure_dir(path):
+    if not os.path.isdir(path):
+        os.makedirs(path)
+    return path
+
+
+def write_json(state, session, path, final=None):
+    """Rewritten in full on every [S] and on [Q], always to the same path.
+
+    One file per session, named from session_start, so a later run cannot
+    overwrite an earlier run's measurements.
+    """
     payload = {
         'note': ('REFERENCE ONLY. Not loaded by any experiment. '
                  'Values are read by humans and entered manually.'),
@@ -1021,9 +1082,126 @@ def write_json(state, session, final=None):
     payload['snapshots'] = state['snapshots']
     if final is not None:
         payload['final'] = final
-    with open(OUT_PATH, 'w') as handle:
+    with open(path, 'w') as handle:
         json.dump(payload, handle, indent=2)
-    return OUT_PATH
+    return path
+
+
+def save_screenshot(win, slug=None):
+    """PNG of the frame currently on screen (PRD 11).
+
+    getMovieFrame() grabs the FRONT buffer, which is the frame the operator is
+    looking at -- the loop flips at the end of each pass, so by the time keys
+    are polled the front buffer holds the completed frame.
+    """
+    ensure_dir(SCREENSHOT_DIR)
+    path = os.path.join(SCREENSHOT_DIR,
+                        SCREENSHOT_NAME_FMT.format(slug or timestamp_slug()))
+    win.getMovieFrame()
+    win.saveMovieFrames(path)
+    return path
+
+
+# =============================================================================
+# AUTO GAMMA SWEEP  (PRD 6.5)
+# =============================================================================
+
+def start_sweep(state, clock):
+    """Begin at level 0, remembering where to put the operator back."""
+    sweep = {'return_index': state['gamma_step_index'],
+             'level_started': clock.getTime(),
+             'remaining': SETTLE_S}
+    state['gamma_step_index'] = 0
+    return sweep
+
+
+def cancel_sweep(state, sweep):
+    """Abandon the sweep and restore the level the operator was on."""
+    state['gamma_step_index'] = sweep['return_index']
+    return None
+
+
+def sweep_due(sweep, clock):
+    """True once the current level has settled long enough to be read.
+
+    Also refreshes the countdown the HUD shows.
+    """
+    elapsed = clock.getTime() - sweep['level_started']
+    sweep['remaining'] = SETTLE_S - elapsed
+    return elapsed >= SETTLE_S
+
+
+def sweep_step(state, sweep, clock):
+    """Advance to the next level, or end the sweep after the last one.
+
+    Called only AFTER the settled level has been snapshotted -- the reading
+    belongs to the level that just settled, so the index must not move until
+    it has been recorded. Returns the sweep, or None when complete.
+    """
+    if state['gamma_step_index'] >= len(GAMMA_LEVELS) - 1:
+        return cancel_sweep(state, sweep)
+    state['gamma_step_index'] += 1
+    sweep['level_started'] = clock.getTime()
+    sweep['remaining'] = SETTLE_S
+    return sweep
+
+
+# =============================================================================
+# PRESETS  (PRD 10)
+# =============================================================================
+
+def preset_from_state(state):
+    """Everything a preset carries: the stimulus, not the rig or the run."""
+    return {key: value for key, value in state.items()
+            if key not in PRESET_EXCLUDE}
+
+
+def save_preset(state, slug=None):
+    """Write the current knobs to presets/preset_<stamp>.json."""
+    ensure_dir(PRESET_DIR)
+    path = os.path.join(PRESET_DIR,
+                        PRESET_NAME_FMT.format(slug or timestamp_slug()))
+    with open(path, 'w') as handle:
+        json.dump(preset_from_state(state), handle, indent=2, sort_keys=True)
+    return path
+
+
+def load_preset(path):
+    """Read a preset file. Returns {} and warns rather than dying.
+
+    A preset is a convenience, not data: a broken one should cost you the
+    preset, not the calibration session you were about to run.
+    """
+    try:
+        with open(path) as handle:
+            loaded = json.load(handle)
+    except Exception as err:                                 # noqa: BLE001
+        print("ERROR: could not read preset {}: {}".format(path, err))
+        return {}
+    if not isinstance(loaded, dict):
+        print("ERROR: preset {} is not a JSON object.".format(path))
+        return {}
+    return loaded
+
+
+def apply_preset(state, loaded):
+    """Overlay a preset onto a default state. Returns the keys applied.
+
+    Forward and backward compatible on purpose: keys the preset omits keep
+    their defaults, and keys it carries that this version no longer has are
+    ignored. Neither case is an error -- presets outlive tool versions.
+    """
+    applied, ignored = [], []
+    for key, value in loaded.items():
+        if key in PRESET_EXCLUDE or key not in state:
+            ignored.append(key)
+            continue
+        state[key] = value
+        applied.append(key)
+    if ignored:
+        print("Preset: ignored {} unknown key(s): {}".format(
+            len(ignored), ', '.join(sorted(ignored)[:8])))
+    return applied
 
 
 # =============================================================================
@@ -1038,12 +1216,25 @@ def parse_args(argv=None):
         '--image', metavar='PATH', default=None,
         help='PNG texture for stimulus type [5]. Without it, [5] uses a '
              'generated 256x256 checkerboard test pattern.')
+    parser.add_argument(
+        '--preset', metavar='PATH', default=None,
+        help='Preset JSON saved with [P]. Restores the knobs and preselects '
+             'the stimulus type it was saved from.')
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv)
     image, image_label = resolve_image(args.image)
+
+    # Fixed once, before anything can write: session_start, the output
+    # filename and every generated name this run share one stamp.
+    session_started = datetime.datetime.now()
+    session_slug = timestamp_slug(session_started)
+    out_path = session_out_path(session_slug)
+
+    preset = load_preset(args.preset) if args.preset else {}
+    preset_name = os.path.basename(args.preset) if args.preset else ''
 
     mon = monitors.Monitor(MONITOR_NAME)
 
@@ -1072,7 +1263,15 @@ def main(argv=None):
         print("WARNING: could not measure refresh rate; assuming 60.00 Hz. "
               "Frame-count frequencies will NOT be the stated values.")
 
-    stimulus_type = show_intro(win, resolution, measured_refresh, image_label)
+    # A preset opens the selector on the type it was saved from.
+    preset_index = 0
+    if preset.get('stimulus_type') in STIMULUS_TYPES:
+        preset_index = STIMULUS_TYPES.index(preset['stimulus_type'])
+
+    stimulus_type = show_intro(win, resolution, measured_refresh, image_label,
+                               out_name=os.path.basename(out_path),
+                               preset_name=preset_name,
+                               selected_index=preset_index)
     if stimulus_type is None:
         win.close()
         print("Aborted at intro screen. Nothing written.")
@@ -1081,7 +1280,15 @@ def main(argv=None):
     state = default_state(stimulus_type)
     state['image_path'] = image_label
     state['aspect'] = resolution[0] / float(resolution[1])
-    table = knob_table(stimulus_type)
+    if preset:
+        # Applied after default_state so omitted keys keep their defaults,
+        # and after stimulus_type so the operator's choice at the selector
+        # wins over the preset's if they changed it.
+        applied = apply_preset(state, preset)
+        state['stimulus_type'] = stimulus_type
+        print("Preset {}: applied {} value(s).".format(preset_name,
+                                                       len(applied)))
+    table = knob_table(state['stimulus_type'])
 
     # ---- Stimuli (PRD 4) -----------------------------------------------------
     stim = None
@@ -1155,6 +1362,19 @@ def main(argv=None):
     flash_frames = 0
     flash_text = ''
 
+    # Auto gamma sweep state: None when idle (PRD 6.5).
+    sweep = None
+    sweep_clock = core.Clock()
+
+    def take_snapshot():
+        """One snapshot appended and the session file rewritten."""
+        state['snapshots'].append(state_record(
+            state, screen_height_cm, measured_refresh,
+            rolling_hz=rolling_hz, drops=dropped_frames,
+            snapshot_number=len(state['snapshots']) + 1))
+        write_json(state, session, out_path)
+        return len(state['snapshots'])
+
     # Rebuilding the Gaussian mask uploads a 256x256 texture, so it happens
     # only when the SD or the size it is relative to actually changes.
     mask_cache = [None]
@@ -1185,7 +1405,9 @@ def main(argv=None):
 
     # ---- Live frame timing (rolling, not the one-shot startup figure) -------
     session = session_header(win, mon, resolution, screen_height_cm,
-                             measured_refresh, args.image)
+                             measured_refresh, args.image,
+                             started=session_started, out_path=out_path,
+                             preset_arg=args.preset)
     frame_clock = core.Clock()
     intervals = collections.deque(maxlen=ROLLING_FRAMES)
     startup_threshold = DROP_FACTOR / measured_refresh
@@ -1220,15 +1442,51 @@ def main(argv=None):
                 state['dual'] = not state['dual']
                 continue
 
+            # --- Auto gamma sweep (PRD 6.5). [A] is a knob on two stimulus
+            # types, so gamma mode has to claim it the way it claims the
+            # arrows -- otherwise starting a sweep would also nudge the
+            # envelope SD or the blue channel underneath it.
+            if state['mode'] == MODE_GAMMA and key == 'a':
+                if sweep is None:
+                    sweep = start_sweep(state, sweep_clock)
+                else:
+                    sweep = cancel_sweep(state, sweep)
+                    flash_text, flash_frames = 'Auto gamma cancelled', \
+                        FLASH_FRAMES
+                continue
+            # ESC cancels a running sweep rather than quitting, so a mistimed
+            # press cannot end the session mid-ramp.
+            if sweep is not None and key == 'escape':
+                sweep = cancel_sweep(state, sweep)
+                flash_text, flash_frames = 'Auto gamma cancelled', FLASH_FRAMES
+                continue
+
             # --- Arrows are claimed by two modes (PRD 6.2, 6.4) -------------
             if mode_claims_key(state, key):
                 if state['mode'] == MODE_GAMMA:
+                    if sweep is not None:
+                        continue      # the sweep is driving the level
                     step = 1 if key == 'right' else -1
                     state['gamma_step_index'] = int(clamp(
                         state['gamma_step_index'] + step, 0,
                         len(GAMMA_LEVELS) - 1))
                 else:
                     move_uniformity(state, key)
+                continue
+
+            if key == 'p':
+                path = save_preset(state, timestamp_slug())
+                flash_text = 'Preset saved: {}'.format(os.path.basename(path))
+                flash_frames = FLASH_FRAMES
+                print("PRESET saved to {}".format(path))
+                continue
+
+            if key == 'f12':
+                path = save_screenshot(win, timestamp_slug())
+                flash_text = 'Screenshot saved: {}'.format(
+                    os.path.basename(path))
+                flash_frames = FLASH_FRAMES
+                print("SCREENSHOT saved to {}".format(path))
                 continue
 
             if key in table:
@@ -1238,15 +1496,10 @@ def main(argv=None):
                     continue
                 apply_knob(state, key, table)
             elif key == 's':
-                state['snapshots'].append(state_record(
-                    state, screen_height_cm, measured_refresh,
-                    rolling_hz=rolling_hz, drops=dropped_frames,
-                    snapshot_number=len(state['snapshots']) + 1))
-                write_json(state, session)
-                flash_text = 'Snapshot #{} saved'.format(
-                    len(state['snapshots']))
+                count = take_snapshot()
+                flash_text = 'Snapshot #{} saved'.format(count)
                 flash_frames = FLASH_FRAMES
-                print("SNAPSHOT {} saved.".format(len(state['snapshots'])))
+                print("SNAPSHOT {} saved.".format(count))
             elif key in ('q', 'escape'):
                 running = False
 
@@ -1289,6 +1542,20 @@ def main(argv=None):
                 for _ in range(due - repeat_count.get(name, 0)):
                     apply_knob(state, name, table)
                 repeat_count[name] = due
+
+        # ---- Auto gamma sweep (PRD 6.5) --------------------------------------
+        # Driven here rather than from the key handler so the dwell is wall
+        # clock, not frame count, and holds at 2 s on any panel.
+        if sweep is not None and sweep_due(sweep, sweep_clock):
+            # Snapshot the level that just settled, THEN move on.
+            count = take_snapshot()
+            print("AUTO GAMMA snapshot {} (level {}/{}).".format(
+                count, state['gamma_step_index'] + 1, len(GAMMA_LEVELS)))
+            sweep = sweep_step(state, sweep, sweep_clock)
+            if sweep is None:
+                flash_text = 'Auto gamma complete: {} levels'.format(
+                    len(GAMMA_LEVELS))
+                flash_frames = FLASH_FRAMES
 
         # ---- Live parameter application --------------------------------------
         win.color = [state['bg_gray']] * 3
@@ -1360,7 +1627,8 @@ def main(argv=None):
 
         hud.text = build_hud(state, resolution, measured_refresh,
                              rolling_hz, screen_height_cm,
-                             sd_ms=rolling_sd_ms, drops=dropped_frames)
+                             sd_ms=rolling_sd_ms, drops=dropped_frames,
+                             sweep=sweep)
         hud.draw()
 
         if flash_frames > 0:
@@ -1415,8 +1683,7 @@ def main(argv=None):
 
     final = state_record(state, screen_height_cm, measured_refresh,
                          rolling_hz=rolling_hz, drops=dropped_frames)
-    path = write_json(state, session,
-                      final=final)
+    path = write_json(state, session, out_path, final=final)
     win.close()
 
     print("")

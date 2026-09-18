@@ -36,6 +36,7 @@ Run it:
 ```bash
 python monical.py
 python monical.py --image assets/texture.png
+python monical.py --preset presets/preset_2026-09-18_143201.json
 ```
 
 `--image PATH` supplies the texture for stimulus type `[5]`. Without it, `[5]`
@@ -43,8 +44,11 @@ still works and uses a generated 256×256 checkerboard (8×8 cells). A path that
 does not exist prints an error and falls back to the same generated pattern, so
 a typo never ends the session.
 
-There is no config file, no build step, and no installer. The script writes one
-file, `calibration_values.json`, next to itself.
+`--preset PATH` restores knob settings saved earlier with `[P]` (§5f).
+
+There is no config file, no build step, and no installer. Each session writes
+one file, `monical_YYYY-MM-DD_HHMMSS.json`, next to the script — a new one
+every run, so nothing you measured is ever overwritten.
 
 ---
 
@@ -68,6 +72,10 @@ White text on black. Four blocks:
 3. **Workflow tutorial** — the recommended procedure and key legend for
    whichever type is selected. It redraws as you press `1`–`5`.
 4. **`Press SPACE to begin.`**
+
+The header also shows `Output:` — the filename this session will write to —
+and `Preset:` when one was loaded with `--preset`. Note the output name before
+you start; it is fixed for the whole session.
 
 `Q` or `ESC` here aborts without writing a file. You cannot change stimulus
 type after `SPACE` — restart to switch.
@@ -127,8 +135,14 @@ mode key replaces the current mode.
 
 | Key | Action |
 |---|---|
-| `S` | Save a snapshot and rewrite the JSON. Confirms on screen. |
+| `S` | Save a snapshot and rewrite the session JSON. Confirms on screen. |
+| `P` | Save the current knobs as a preset in `presets/`. Confirms with the filename. |
+| `F12` | Save a PNG of the current frame to `screenshots/`. Confirms with the filename. |
+| `A` | Gamma mode only: start or cancel the auto sweep (§5g). |
 | `Q` or `ESC` | Write final state plus all snapshots, then exit. |
+
+While an auto gamma sweep is running, `ESC` cancels the sweep instead of
+quitting — a mistimed press cannot end the session mid-ramp.
 
 ### Keys that two modes take over
 
@@ -231,6 +245,9 @@ Produces the 11 points you enter into PsychoPy Monitor Center.
 
 3. Press `S` at every level. Each snapshot records `gamma_level` and
    `gamma_step_index` in `stimulus_specific`.
+
+   Or press `A` to let the tool do it — see workflow (g). With both hands on
+   the probe, that is usually the better option.
 4. Let the panel settle before reading each step — LCDs drift for a second or
    two after a large luminance change.
 5. Fit the curve in Monitor Center. Monical does not build or apply gamma
@@ -283,13 +300,62 @@ Checks whether the panel's channels sum linearly.
    readings. A shortfall means channel interaction and your color calibration
    cannot assume additivity.
 
+### f) Saving and reusing a configuration
+
+Once a rig is dialled in, save it so the next session starts there.
+
+1. Set every knob the way you want it.
+2. Press `P`. The readout confirms `Preset saved: preset_2026-09-18_143201.json`
+   and the file lands in `presets/`.
+3. Next session, pass it back:
+
+   ```bash
+   python monical.py --preset presets/preset_2026-09-18_143201.json
+   ```
+
+The intro screen opens on the stimulus type the preset was saved from, and
+shows `Preset:` in the header so you can confirm it loaded. You can still pick
+a different type before `SPACE` — your choice at the selector wins.
+
+A preset holds the stimulus settings, not the rig: window aspect, the
+`--image` path, and the live snapshot list are excluded. Presets are
+forward and backward compatible — missing keys fall back to defaults, and keys
+this version does not recognise are ignored with a console note. A corrupt
+preset prints an error and the session continues with defaults rather than
+dying.
+
+Use `F12` at any point to capture a PNG of the screen into `screenshots/`,
+which is useful for pasting a configuration into lab notes.
+
+### g) Automatic gamma sweep
+
+Runs workflow (b) unattended so you can keep both hands on the photometer.
+
+1. Press `G` to enter gamma mode. Position the probe at screen center.
+2. Press `A`. The sweep starts at level 1 and walks to level 11.
+3. It dwells **2.0 seconds** at each level, then snapshots automatically. The
+   readout counts down: `Auto gamma: level 3/11 -- settling (1.2s)`.
+4. Take your photometer reading during each dwell.
+5. A completed sweep adds exactly 11 snapshots and returns you to the level you
+   were on before pressing `A`.
+
+Press `A` again or `ESC` to cancel mid-sweep; the level you started from comes
+back either way. `ESC` will not quit the session while a sweep is running.
+
+Manual `LEFT`/`RIGHT` stepping is ignored during a sweep. If 2 seconds is not
+long enough for your probe to settle, step manually with `S` instead.
+
 ---
 
 ## 6. Output file
 
-`calibration_values.json`, written beside `monical.py`. Rewritten in full on
-every `S` and again on `Q`. **Overwritten each run** — copy it out before you
-start a second session. Nothing ever reads it back; it exists for you to read.
+`monical_YYYY-MM-DD_HHMMSS.json`, written beside `monical.py` — for example
+`monical_2026-09-18_143201.json`. The name is fixed at startup from
+`session_start` and shown on the intro screen.
+
+Rewritten in full on every `S` and again on `Q`, always to that same file.
+**A new file every run**, so a later session cannot destroy an earlier one's
+measurements. Nothing ever reads it back; it exists for you to read.
 
 ### Session fields
 
@@ -312,6 +378,8 @@ start a second session. Nothing ever reads it back; it exists for you to read.
 | `psychopy_version`, `python_version`, `platform` | provenance |
 | `has_radial_stim` | whether the plugin was available |
 | `image_path` | the `--image` argument as given, or `null` |
+| `preset_path` | the `--preset` argument as given, or `null` |
+| `output_file` | this file's own name, so a renamed copy still says where it came from |
 | `viewing_distance_cm` | distance at quit |
 | `stimulus_type` | type chosen at startup |
 | `snapshots` | list, in order |
