@@ -10,7 +10,7 @@ this adds nothing to the runtime requirements.
 
     python tools/generate_previews.py
 
-Writes seven 800x500 PNGs into docs/img/, overwriting them.
+Writes eight 800x500 PNGs into docs/img/, overwriting them.
 
 The stimulus maths below mirrors PsychoPy's own texture construction so the
 previews are faithful rather than decorative:
@@ -19,6 +19,7 @@ previews are faithful rather than decorative:
   * gabor      sin grating multiplied by a Gaussian alpha mask
   * grating    the same sin grating with a hard square edge
   * custom     the 8x8 fallback pattern monical generates without --image
+  * text       the default ABCDEF string in the monospaced face
 
 The HUD and intro text are verbatim snapshots of what monical.py prints, taken
 from build_hud() and build_intro_text(). If either of those changes, re-run
@@ -44,6 +45,11 @@ PSYCHOPY_GRAY = 0.5
 UNIFORM_BG = 0.25
 UNIFORM_RGB = (0.0, 0.7, 0.0)             # PsychoPy signed rgb, -1..+1
 TEXT_BG = 0.0                             # intro and HUD are white on black
+# The text stimulus defaults to rgb 0.0 -- mid-gray on a mid-gray ground, so
+# at defaults it is genuinely invisible, exactly like the uniform patch. The
+# preview drives it white so the glyphs read.
+TEXT_STIM_RGB = (1.0, 1.0, 1.0)
+TEXT_STIM_STRING = 'ABCDEF'
 
 WIDTH_PX, HEIGHT_PX = 800, 500
 DPI = 100
@@ -226,6 +232,23 @@ def uniform_patch(px=420):
     return patch
 
 
+def text_stimulus_figure():
+    """The default string in the monospaced face, on PsychoPy gray.
+
+    Drawn with matplotlib's own text rather than a pixel array: this preview
+    is about the glyphs, and rasterising them by hand would misrepresent the
+    face monical actually renders.
+    """
+    fig, ax = new_canvas(PSYCHOPY_GRAY)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    grey = psychopy_rgb(TEXT_STIM_RGB)
+    ax.text(0.5, 0.5, TEXT_STIM_STRING, transform=ax.transAxes,
+            family=FONT, fontsize=64, color=tuple(grey),
+            va='center', ha='center')
+    return fig
+
+
 def fallback_checker(px=416):
     """The 8x8 pattern monical generates when --image is absent."""
     block = px // CHECKER_CELLS
@@ -243,7 +266,8 @@ HUD_TEXT = u"""\
 Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
 X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (243px, 10.61 deg) | Ecc: 28.57 deg
 BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 frames, 50% duty, idle)
-SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)"""
+SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
+[H] Text: ON | [M] Menu: OFF | [F/J] Custom Hz: 15 | Mode: static_on | File: monical_2026-09-18_143201.json"""
 
 INTRO_TEXT = u"""\
 MONICAL -- Monitor Calibration Tool  v0.1
@@ -319,12 +343,15 @@ def main():
         show_field(ax, field, bg)
         save(fig, name, bg)
 
-    save(text_screen(HUD_TEXT, 11.5), 'hud_example.png', TEXT_BG)
+    save(text_stimulus_figure(), 'text.png', PSYCHOPY_GRAY)
+
+    # 6 lines, longest 105 chars: 8.2pt keeps it inside 800px.
+    save(text_screen(HUD_TEXT, 8.2), 'hud_example.png', TEXT_BG)
     # 31 lines: 9.2pt at 1.22 spacing fills the canvas without overflowing it.
     save(text_screen(INTRO_TEXT, 9.2, linespacing=1.22),
          'intro_screen.png', TEXT_BG)
 
-    print('Done: {} images.'.format(len(STIMULI) + 2))
+    print('Done: {} images.'.format(len(STIMULI) + 3))
 
 
 if __name__ == '__main__':

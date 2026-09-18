@@ -273,7 +273,11 @@ Preset strings: `ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO`. A custom strin
 
 PsychoPy's `TextStim` has **no `letterSpacing` parameter**, so there is no letter-spacing knob.
 
+**Readout line 5:** `Text: 'ABCDEF' | R: 0.000 | G: 0.000 | B: 0.000 | Alpha: 1.000`
+
 **Stimulus-specific snapshot fields:** `{"text_string": "ABCDEF", "font": "Courier New", "alpha": 1.0, "r": 0.0, "g": 0.0, "b": 0.0}`
+
+Note the colour defaults are all 0.0, which is mid-gray — the same value as the default background, so at defaults the glyphs are invisible. Drive the channels up or the background down before expecting to see anything. The uniform patch (§4.4) behaves the same way for the same reason.
 
 ---
 
@@ -430,9 +434,52 @@ Line 2 ends with the session's output filename.
 
 ### 8.1 Hiding the readout
 
-**`[H]`** toggles the readout. It hides *only* the multi-line readout text — stimulus, fixation cross and the gamma patch all keep rendering. For photometer readings and screenshots with no text overlay. Default visible; tracked as `hud_visible`.
+**`[H]`** toggles the readout. It hides *only* the multi-line readout text — stimulus, fixation cross, the gamma patch and the bottom status bar (§8.2) all keep rendering. For photometer readings and screenshots with no text overlay. Default visible; tracked as `hud_visible`.
 
 Custom-frequency-down moved from `[H]` to `[J]` to free the key, so the frequency pair is `[F/J]` (§5).
+
+### 8.2 Bottom status bar
+
+A separate single line at the very bottom, below the readout, in smaller dimmer text so the two do not read as one block. **It is always drawn and does NOT hide with `[H]`.**
+
+```
+[H] Text: ON | [M] Menu: OFF | [F/J] Custom Hz: 15 | Mode: static_on | File: monical_2026-09-18_143201.json
+```
+
+It updates live and carries:
+
+- `[H] Text: ON/OFF` — whether the readout is visible, with the key that changes it
+- `[M] Menu: ON/OFF` — whether the keybinding overlay is showing
+- `[F/J] Custom Hz` — the current custom frequency **and the keys that adjust it**. This is the discoverability mode 5 otherwise lacks: nothing else on screen says how to change the rate it flickers at
+- the mode name
+- the session output filename, truncated from the left when long
+
+The point is that even with the readout hidden, the operator can still see which toggles are on, what the custom rate is, and where the data is going.
+
+### 8.3 Keybinding menu overlay
+
+`[M]` toggles a reference card listing every binding for the current stimulus type: a dark panel at about 60% of the screen, centred, at 88% opacity so **the stimulus keeps rendering and stays visible behind it**.
+
+```
+KEYBINDINGS -- Text / letter string
+
+MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position
+DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast
+FREQUENCY: F/J = Custom Hz | ;/' = Viewing distance
+MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom
+           G=Gamma  7=Dual  8=Uniformity
+ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot
+           H=Toggle HUD  M=This menu  Q=Quit
+
+THIS STIMULUS:
+  B/N = Cycle string | R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha
+
+[M] or [ESC] to dismiss
+```
+
+The `THIS STIMULUS` block changes with the selected type, and gamma steps and spatial uniformity add a line for the keys those modes take over. Knobs stay live while the card is up, so a value can be adjusted while reading how.
+
+**`[ESC]` is claimed in order:** dismiss the menu, else cancel a running auto gamma sweep, else quit. Quitting is last so neither overlay can be closed by accidentally ending the session.
 
 Line 5 for `custom_png` shows:
 
