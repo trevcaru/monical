@@ -37,6 +37,7 @@ Run it:
 python monical.py
 python monical.py --image assets/texture.png
 python monical.py --preset presets/preset_2026-09-18_143201.json
+python monical.py --text "MYSTRING"
 ```
 
 `--image PATH` supplies the texture for stimulus type `[5]`. Without it, `[5]`
@@ -45,6 +46,9 @@ does not exist prints an error and falls back to the same generated pattern, so
 a typo never ends the session.
 
 `--preset PATH` restores knob settings saved earlier with `[P]` (§5f).
+
+`--text STRING` adds a custom string to the `[B]`/`[N]` cycle for stimulus
+type `[6]` and selects it at startup. There is no on-screen text entry.
 
 There is no config file, no build step, and no installer. Each session writes
 one file, `monical_YYYY-MM-DD_HHMMSS.json`, next to the script — a new one
@@ -59,7 +63,7 @@ White text on black. Four blocks:
 1. **System info** — resolution, measured refresh rate, PsychoPy version, and
    whether `psychopy_visionscience` imported. A failure here is reported with
    the pip command, not a crash.
-2. **Stimulus selector** — press `1`–`5` to choose:
+2. **Stimulus selector** — press `1`–`6` to choose:
 
    ```
    [1] Radial checkerboard (SSVEP standard)
@@ -67,10 +71,11 @@ White text on black. Four blocks:
    [3] Sinusoidal grating (contrast/SF tuning)
    [4] Uniform patch (color/luminance calibration)
    [5] Custom PNG (your own texture)
+   [6] Text / letter string
    ```
 
 3. **Workflow tutorial** — the recommended procedure and key legend for
-   whichever type is selected. It redraws as you press `1`–`5`.
+   whichever type is selected. It redraws as you press `1`–`6`.
 4. **`Press SPACE to begin.`**
 
 The header also shows `Output:` — the filename this session will write to —
@@ -82,6 +87,10 @@ type after `SPACE` — restart to switch.
 
 If you select `[1]` without the plugin installed, the screen warns you and
 still lets you proceed; the disc simply will not draw.
+
+A **yellow warning** appears if the monitor's stored height is outside
+15–80 cm or missing. It does not block, but every degree figure is wrong
+until you fix the width in PsychoPy Monitor Center (§8).
 
 ---
 
@@ -139,10 +148,17 @@ mode key replaces the current mode.
 | `P` | Save the current knobs as a preset in `presets/`. Confirms with the filename. |
 | `F12` | Save a PNG of the current frame to `screenshots/`. Confirms with the filename. |
 | `A` | Gamma mode only: start or cancel the auto sweep (§5g). |
+| `0` | Show/hide the readout. Stimulus and fixation keep rendering. |
+| `B` / `N` | Text type only: cycle preset strings forward/back. |
 | `Q` or `ESC` | Write final state plus all snapshots, then exit. |
 
 While an auto gamma sweep is running, `ESC` cancels the sweep instead of
 quitting — a mistimed press cannot end the session mid-ramp.
+
+**The HUD toggle is `0`, not `H`** — `H` is custom-frequency-down. Hiding the
+readout hides only the text; the stimulus, fixation cross and gamma patch all
+keep drawing, which is what you want for an unobstructed photometer reading or
+a clean screenshot.
 
 ### Keys that two modes take over
 
@@ -193,6 +209,21 @@ legend is always on HUD line 5.
 | Param | Keys | Step | Default | Range |
 |---|---|---|---|---|
 | Alpha | `Z` / `X` | ±0.01 | 1.0 | 0.0–1.0 |
+
+**Text / letter string**
+
+| Param | Keys | Step | Default | Range | Repeat |
+|---|---|---|---|---|---|
+| Preset string | `B` / `N` | cycle | `ABCDEF` | 5 presets + `--text` |  |
+| Red | `R` / `T` | ±0.001 | 0.0 | −1.0–1.0 | hold |
+| Green | `E` / `W` | ±0.001 | 0.0 | −1.0–1.0 | hold |
+| Blue | `D` / `A` | ±0.001 | 0.0 | −1.0–1.0 | hold |
+| Alpha | `Z` / `X` | ±0.01 | 1.0 | 0.0–1.0 | single press |
+
+Colour uses the same keys as the uniform patch. Presets are `ABCDEF`,
+`abcdef`, `123456`, `XXXXXX`, `oOoOoO`. The universal size knob sets letter
+height, so the degrees on line 3 describe the letters. PsychoPy's `TextStim`
+has no letter-spacing parameter, so there is no spacing knob.
 
 **Radial checkerboard** — no extra keys. The construction is locked to the
 SSVEP standard form; use the universal contrast knob.
@@ -258,8 +289,8 @@ Produces the 11 points you enter into PsychoPy Monitor Center.
 1. Put a photodiode on the stimulus. Press `1` first to confirm it is aimed
    correctly.
 2. Press `3` (15 Hz) or `4` (20 Hz). **Read the realized frequency from HUD
-   line 4, not the mode name.** It shows `Freq: 14.998 Hz (16 frames, 8 on /
-   8 off)` — frames per cycle, and the ON/OFF split.
+   line 4, not the mode name.** It shows `Freq: 15.00 Hz (16 frames, 50%
+   duty)` — frames per cycle, and the ON share of that cycle.
 3. For any other rate, set it with `F` / `H` and press `5`.
 4. Confirm the scope trace matches the realized Hz and that the duty cycle is
    symmetric.
@@ -345,6 +376,20 @@ back either way. `ESC` will not quit the session while a sweep is running.
 Manual `LEFT`/`RIGHT` stepping is ignored during a sweep. If 2 seconds is not
 long enough for your probe to settle, step manually with `S` instead.
 
+### h) Text legibility
+
+1. Select `[6]` at startup. Press `1` (static ON).
+2. Cycle to the string you want with `B` / `N`, or start with
+   `--text "MYSTRING"`.
+3. Set the size knob until line 3 reports the letter height you need in
+   degrees. The pixel figure beside it tells you whether the glyphs have
+   enough pixels to be rendered faithfully — below ~10 px tall, antialiasing
+   dominates and the measurement is about the renderer, not the observer.
+4. Step contrast with `C` / `V` for a legibility threshold, snapshotting
+   with `S` at each step.
+5. Press `0` to hide the readout before judging legibility, so HUD text is
+   not in the observer's field.
+
 ---
 
 ## 6. Output file
@@ -366,6 +411,7 @@ measurements. Nothing ever reads it back; it exists for you to read.
 | `monitor_name` | PsychoPy Monitor used (`testMonitor`) |
 | `monitor_resolution` | `[width, height]` in pixels |
 | `monitor_width_cm`, `monitor_height_cm` | physical size; height is derived from width and pixel aspect. `null` if unset |
+| `monitor_dimension_warning` | `true` when the height is missing or outside 15–80 cm, meaning the angles are suspect |
 | `color_space` | `"rgb"` — the −1 to +1 space all colors below are in |
 | `units` | `"height"` — the unit all positions and sizes below are in |
 | `window_fullscreen` | whether the window was fullscreen |
@@ -424,6 +470,7 @@ nothing you dialed in is lost to rounding.
 | `grating` | `sf`, `ori`, `phase` |
 | `uniform_patch` | `r`, `g`, `b`, `alpha` |
 | `custom_png` | `filepath`, `alpha` |
+| `text` | `text_string`, `font`, `alpha`, `r`, `g`, `b` |
 
 Plus, depending on mode: `gamma_level` and `gamma_step_index` in gamma steps;
 `grid_position`, `grid_x`, `grid_y` (and `patch_*`) in spatial uniformity;
@@ -453,9 +500,9 @@ Five lines, bottom center, updated every frame.
 
 ```
 1920x1080 | 239.94 Hz (σ=0.12ms) | Drops: 0 | PsychoPy 2026.2.2 | Dist: 40 cm
-Mode: static_on | Stim: gabor
-X: 0.66 | Y: 0.00 | Size: 0.23 (10.61 deg) | Ecc: 28.57 deg
-BG: 0.000 | Contrast: 1.000 | Freq: 14.998 Hz (16 frames, idle)
+Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
+X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (10.61 deg, 243px) | Ecc: 28.57 deg
+BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 frames, 50% duty, idle)
 SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
 ```
 
@@ -472,20 +519,24 @@ measurement.
   stimulus is not on screen for the durations the HUD claims, and any
   oscilloscope reading taken now is suspect.
 
-**Line 2 — mode.** Mode name, then either the stimulus type or, in the two
+**Line 2 — mode.** Mode name, the session's output filename, then either the stimulus type or, in the two
 modes that own the screen, what that mode owns — in gamma steps
 `Level 9/11: +0.6 rgb (204 8-bit)`, in spatial uniformity
 `Cell: top_left (-0.78, 0.39)`. `DUAL +/-X` appears when `7` is on.
 
-**Line 3 — geometry.** Position in height units, then size and eccentricity in
-degrees. Size uses the extent formula, eccentricity the displacement formula —
+**Line 3 — geometry.** Position in height units with the pixel coordinate
+beside it, then size and eccentricity in degrees, with size also in pixels.
+Pixels need only the window, so they show even when the monitor's physical
+size is unknown. Size uses the extent formula, eccentricity the displacement formula —
 they are not the same calculation. Both show `--` when physical monitor
 dimensions are unknown.
 
 **Line 4 — luminance and timing.** Background and contrast to three decimals.
 `Freq` is always the **realized** frequency from the integer frame count, with
-the count and the ON/OFF split. In a non-flicker mode it is marked `idle` and
-shows what the current custom setting *would* produce.
+the count and the duty cycle — the ON share, `(frames // 2) / frames`. Only an
+even frame count can give 50%; an odd one puts the shorter half ON, so 3 frames
+reads `33% duty`. In a non-flicker mode it is marked `idle` and shows what the
+current custom setting *would* produce.
 
 **Line 5 — stimulus-specific.** The active key legend's values. For a Gabor it
 shows the envelope SD in height units plus the PsychoPy `mask sd` it converts

@@ -44,16 +44,17 @@ d) Compare against the HUD's realized Hz (line 4) and the JSON's
    `flicker_realized_hz`.
 e) Repeat for mode `4` (20 Hz) and mode `5` with at least three custom values
    (e.g. 6, 10, 30 Hz). Set the custom rate with `F` / `H` before pressing `5`.
-f) Check duty cycle. At 240 Hz all modes are 50/50. At 60 Hz the 20 Hz mode is
-   33/67 — 1 frame on, 2 off — because 60/20 = 3 frames and the on-half is
-   `frames // 2`. Expected, not a bug.
+f) Check duty cycle, which the readout states directly. At 240 Hz all modes
+   read `50% duty`. At 60 Hz the 20 Hz mode reads `33% duty` — 1 frame on,
+   2 off — because 60/20 = 3 frames and the on-half is `frames // 2`.
+   Expected, not a bug. Compare the scope's measured duty against it.
 g) Record for each frequency: requested Hz, realized Hz from the HUD, measured
    Hz from the scope. They should agree within scope measurement precision.
 h) During a clean run the HUD drop counter should read `0`. If it increments
    during measurement, the timing data for that interval is unreliable.
 
 **Read the realized value, never the requested one.** The HUD shows frames per
-cycle beside it (`Freq: 14.998 Hz (16 frames, 8 on / 8 off)`). Only divisors of
+cycle and duty beside it (`Freq: 15.00 Hz (16 frames, 50% duty)`). Only divisors of
 the refresh rate are exactly achievable — at 60 Hz, a requested 17 Hz lands on
 4 frames and delivers ~15 Hz.
 

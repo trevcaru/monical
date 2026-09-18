@@ -91,7 +91,8 @@ SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
 # State keys that describe the rig or the run rather than the stimulus, and so
 # are not carried in a preset. `aspect` comes from the window, `image_path`
 # from --image, and the other two are live loop bookkeeping.
-PRESET_EXCLUDE = ('frame_idx', 'snapshots', 'aspect', 'image_path')
+PRESET_EXCLUDE = ('frame_idx', 'snapshots', 'aspect', 'image_path',
+                  'win_w', 'win_h')
 
 SETTLE_S = 2.0                    # auto gamma dwell per level (PRD 6.5)
 
@@ -101,9 +102,10 @@ STIM_GABOR = 'gabor'
 STIM_GRATING = 'grating'
 STIM_UNIFORM = 'uniform_patch'
 STIM_CUSTOM_PNG = 'custom_png'
+STIM_TEXT = 'text'
 
 STIMULUS_TYPES = [STIM_RADIAL, STIM_GABOR, STIM_GRATING, STIM_UNIFORM,
-                  STIM_CUSTOM_PNG]
+                  STIM_CUSTOM_PNG, STIM_TEXT]
 
 STIMULUS_LABELS = {
     STIM_RADIAL: 'Radial checkerboard (SSVEP standard)',
@@ -111,7 +113,25 @@ STIMULUS_LABELS = {
     STIM_GRATING: 'Sinusoidal grating (contrast/SF tuning)',
     STIM_UNIFORM: 'Uniform patch (color/luminance calibration)',
     STIM_CUSTOM_PNG: 'Custom PNG (your own texture)',
+    STIM_TEXT: 'Text / letter string',
 }
+
+# PRD 4.6. Monospaced so glyph width is uniform and letter height maps
+# predictably onto the size knob.
+TEXT_FONT = 'Courier New'
+TEXT_PRESETS = ['ABCDEF', 'abcdef', '123456', 'XXXXXX', 'oOoOoO']
+TEXT_CYCLE_FWD = 'b'
+TEXT_CYCLE_BACK = 'n'
+
+# Physically implausible screen heights. Below or above these the Monitor
+# object almost certainly holds a default rather than this rig's real size,
+# and every visual angle derived from it is wrong (PRD 15).
+MONITOR_H_MIN_CM = 15.0
+MONITOR_H_MAX_CM = 80.0
+
+# [H] is already custom-frequency-down (PRD 5), so the HUD toggle takes a
+# free key rather than displacing a documented knob.
+HUD_TOGGLE_KEY = '0'
 
 FIXATION_SIZE = (0.07, 0.07)      # experiment FIXATION_SIZE, from the seed
 
@@ -261,6 +281,18 @@ STIM_KNOBS = {
         'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
         'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
     },
+    # Text reuses the uniform patch's colour keys exactly; string cycling gets
+    # its own [B]/[N] rather than overloading [R/T].
+    STIM_TEXT: {
+        'r': ('r', +STEP_RGB, -1.0, 1.0, 'float'),
+        't': ('r', -STEP_RGB, -1.0, 1.0, 'float'),
+        'e': ('g', +STEP_RGB, -1.0, 1.0, 'float'),
+        'w': ('g', -STEP_RGB, -1.0, 1.0, 'float'),
+        'd': ('b', +STEP_RGB, -1.0, 1.0, 'float'),
+        'a': ('b', -STEP_RGB, -1.0, 1.0, 'float'),
+        'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
+        'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
+    },
 }
 
 # Auto-repeating knobs. At 0.001 (bg, contrast, RGB) or 0.005 (position) per
@@ -273,6 +305,7 @@ REPEAT_KEYS = ('left', 'right', 'up', 'down',      # x / y position
 # problem. Alpha is 0.01 and stays single-press.
 REPEAT_KEYS_BY_STIM = {
     STIM_UNIFORM: ('r', 't', 'e', 'w', 'd', 'a'),
+    STIM_TEXT: ('r', 't', 'e', 'w', 'd', 'a'),
 }
 
 # Clock-driven rather than frame-driven, so the rate is the same whatever the
@@ -331,6 +364,16 @@ def hz_to_frames(hz, refresh_hz):
 def frames_to_hz(frames, refresh_hz):
     """Realised Hz. Never a rounded literal -- always derived from frames."""
     return refresh_hz / float(frames)
+
+
+def duty_percent(frames):
+    """ON share of the cycle, from the same `frames // 2` stim_is_on uses.
+
+    Only even frame counts give 50%. An odd count cannot split evenly, so the
+    ON half is the shorter one: 3 frames is 1 on and 2 off, 33%. That is the
+    locked flicker logic showing through, not a rounding artefact.
+    """
+    return (frames // 2) / float(frames) * 100.0
 
 
 def uniformity_rc(name):
@@ -497,9 +540,12 @@ def default_state(stimulus_type):
         'mode': MODE_STATIC_ON,
         'dual': False,            # PRD 6.3, orthogonal to mode
 
-        # Screen width / height, filled in once the window is open. Needed for
-        # the full-screen gamma patch and the uniformity grid extents.
+        # Screen geometry, filled in once the window is open. Needed for the
+        # full-screen gamma patch, the uniformity grid extents and the pixel
+        # readout.
         'aspect': 16.0 / 9.0,
+        'win_w': 1920,
+        'win_h': 1080,
 
         # Grating / Gabor (PRD 4.2, 4.3)
         'sf': 4.0,
@@ -516,6 +562,15 @@ def default_state(stimulus_type):
         # Custom PNG (PRD 4.5). Resolved at startup; GENERATED_LABEL when the
         # fallback pattern is in use.
         'image_path': GENERATED_LABEL,
+
+        # Text stimulus (PRD 4.6)
+        'text_string': TEXT_PRESETS[0],
+        'text_index': 0,
+        'font': TEXT_FONT,
+
+        # HUD visibility (PRD 8.1). Only the readout hides; every stimulus
+        # keeps rendering.
+        'hud_visible': True,
 
         # Mode-local indices
         'gamma_step_index': 5,
@@ -612,6 +667,43 @@ def visual_angle_deg(height_units, screen_height_cm, distance_cm):
     return 2.0 * np.degrees(np.arctan(size_cm / (2.0 * float(distance_cm))))
 
 
+def to_pixels(state):
+    """(x px, y px, size px) for the current position and size (PRD 8).
+
+    Height units are relative to screen HEIGHT on both axes, so both
+    coordinates scale by win_h; only the origin offset differs. Note y grows
+    downward here -- PsychoPy's +y is up, so a positive y_pos reports a pixel
+    row below centre.
+    """
+    win_w, win_h = state['win_w'], state['win_h']
+    return (int(state['x_pos'] * win_h + win_w / 2.0),
+            int(state['y_pos'] * win_h + win_h / 2.0),
+            int(state['size'] * win_h))
+
+
+def monitor_dimension_suspect(screen_height_cm):
+    """True when the stored screen height cannot be this rig's real one.
+
+    An absent height makes every angle unavailable; an implausible one makes
+    them plausible AND wrong, which is worse. Both warrant the warning.
+    """
+    if not screen_height_cm:
+        return True
+    return not (MONITOR_H_MIN_CM <= screen_height_cm <= MONITOR_H_MAX_CM)
+
+
+def monitor_warning_text(screen_height_cm):
+    if not monitor_dimension_suspect(screen_height_cm):
+        return ''
+    if not screen_height_cm:
+        measured = 'monitor height is unknown'
+    else:
+        measured = 'monitor height {:.1f} cm looks wrong'.format(
+            screen_height_cm)
+    return ('WARNING: {}. Set physical dimensions in PsychoPy Monitor '
+            'Center. Visual angles will be incorrect.'.format(measured))
+
+
 def eccentricity_deg(offset_units, screen_height_cm, distance_cm):
     """Degrees from fixation to an OFF-AXIS point, in 'height' units.
 
@@ -682,6 +774,16 @@ WORKFLOWS = {
         "",
         "KNOBS: [R/T] red   [E/W] green   [D/A] blue   [Z/X] alpha",
         "       plus the universal knobs.",
+    ],
+    STIM_TEXT: [
+        "1. Cycle preset strings with [B]/[N], or pass your own",
+        "   with --text \"MYSTRING\".",
+        "2. Adjust size for the target letter height in degrees;",
+        "   HUD line 3 shows it in degrees and pixels.",
+        "3. Step contrast for a legibility threshold.",
+        "",
+        "KNOBS: [B/N] cycle string   [R/T] red   [E/W] green",
+        "       [D/A] blue   [Z/X] alpha   plus the universal knobs.",
     ],
     STIM_CUSTOM_PNG: [
         "Load your experiment texture, verify rendering at target",
@@ -759,7 +861,7 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label,
 
 
 def show_intro(win, resolution, refresh_hz, image_label, out_name='',
-               preset_name='', selected_index=0):
+               preset_name='', selected_index=0, warning=''):
     """White on black. Returns the chosen stimulus type, or None if aborted.
 
     `selected_index` preselects a type -- a loaded preset opens on the type it
@@ -780,9 +882,19 @@ def show_intro(win, resolution, refresh_hz, image_label, out_name='',
         pos=(0, 0), wrapWidth=1.7, alignText='left', anchorHoriz='center',
         autoLog=False)
 
+    # Yellow, and a separate stim because TextStim colours the whole block.
+    warn = None
+    if warning:
+        warn = visual.TextStim(
+            win, text=warning, font=READOUT_FONT, height=0.020,
+            color='yellow', pos=(0, -0.44), wrapWidth=1.7,
+            alignText='center', anchorHoriz='center', autoLog=False)
+
     event.clearEvents()
     while True:
         text.draw()
+        if warn is not None:
+            warn.draw()
         win.flip()
 
         dirty = False
@@ -859,6 +971,9 @@ def stim_line(state, sweep=None):
     if stim_type == STIM_UNIFORM:
         return 'R: {:.3f} | G: {:.3f} | B: {:.3f} | Alpha: {:.3f}'.format(
             state['r'], state['g'], state['b'], state['alpha'])
+    if stim_type == STIM_TEXT:
+        return "Text: '{}' | Font: {} | Alpha: {:.3f}".format(
+            state['text_string'], state['font'], state['alpha'])
     if stim_type == STIM_CUSTOM_PNG:
         # Filename only; the full path goes in the snapshot (PRD 8).
         return 'File: {} | Alpha: {:.3f}'.format(
@@ -867,12 +982,13 @@ def stim_line(state, sweep=None):
 
 
 def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
-              sd_ms=None, drops=0, sweep=None):
+              sd_ms=None, drops=0, sweep=None, out_name=''):
     """The five lines of PRD 8, rebuilt every frame."""
     size_deg = visual_angle_deg(state['size'], screen_height_cm,
                                 state['viewing_distance_cm'])
     ecc_deg = eccentricity_deg(state['x_pos'], screen_height_cm,
                                state['viewing_distance_cm'])
+    px_x, px_y, px_size = to_pixels(state)
 
     # While flickering, report what the active mode realises. Otherwise report
     # what the standing custom setting WOULD realise, marked idle so nobody
@@ -880,12 +996,11 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
     frames = mode_frames(state, refresh_hz)
     if frames is None:
         idle = hz_to_frames(state['custom_freq_hz'], refresh_hz)
-        freq_text = 'Freq: {:.3f} Hz ({} frames, idle)'.format(
-            frames_to_hz(idle, refresh_hz), idle)
+        freq_text = 'Freq: {:.2f} Hz ({} frames, {:.0f}% duty, idle)'.format(
+            frames_to_hz(idle, refresh_hz), idle, duty_percent(idle))
     else:
-        freq_text = 'Freq: {:.3f} Hz ({} frames, {} on / {} off)'.format(
-            frames_to_hz(frames, refresh_hz), frames,
-            frames // 2, frames - frames // 2)
+        freq_text = 'Freq: {:.2f} Hz ({} frames, {:.0f}% duty)'.format(
+            frames_to_hz(frames, refresh_hz), frames, duty_percent(frames))
 
     return '\n'.join([
         # Rolling rate, not the startup measurement: a panel that is dropping
@@ -897,10 +1012,14 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
             u'σ=--' if sd_ms is None
             else u'σ={:.2f}ms'.format(sd_ms),
             drops, PSYCHOPY_VERSION, state['viewing_distance_cm']),
-        mode_line(state),
-        'X: {:.2f} | Y: {:.2f} | Size: {:.2f} ({} deg) | Ecc: {} deg'.format(
-            state['x_pos'], state['y_pos'], state['size'],
-            _deg(size_deg), _deg(ecc_deg)),
+        mode_line(state) + ('' if not out_name
+                            else ' | Out: {}'.format(out_name)),
+        # Degrees need the monitor's physical size and go '--' without it;
+        # pixels only need the window, so they are always available.
+        'X: {:.2f} ({}px) | Y: {:.2f} ({}px) | Size: {:.2f} ({} deg, {}px) '
+        '| Ecc: {} deg'.format(
+            state['x_pos'], px_x, state['y_pos'], px_y, state['size'],
+            _deg(size_deg), px_size, _deg(ecc_deg)),
         'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
             state['bg_gray'], state['contrast'], freq_text),
         stim_line(state, sweep),
@@ -926,6 +1045,15 @@ def stimulus_specific(state):
             'sf': round(state['sf'], STORE_DP),
             'ori': round(state['ori'], STORE_DP),
             'phase': round(state['phase'], STORE_DP),
+        }
+    elif stim_type == STIM_TEXT:
+        record = {
+            'text_string': state['text_string'],
+            'font': state['font'],
+            'alpha': round(state['alpha'], STORE_DP),
+            'r': round(state['r'], STORE_DP),
+            'g': round(state['g'], STORE_DP),
+            'b': round(state['b'], STORE_DP),
         }
     elif stim_type == STIM_UNIFORM:
         record = {
@@ -1025,6 +1153,8 @@ def session_header(win, mon, resolution, screen_height_cm, startup_hz,
         'monitor_width_cm': None if not width_cm else round(float(width_cm), 2),
         'monitor_height_cm': (None if screen_height_cm is None
                               else round(screen_height_cm, 2)),
+        'monitor_dimension_warning': monitor_dimension_suspect(
+            screen_height_cm),
         'color_space': 'rgb',
         'units': UNITS,
         'window_fullscreen': bool(getattr(win, 'fullscr', False)),
@@ -1217,6 +1347,11 @@ def parse_args(argv=None):
         help='PNG texture for stimulus type [5]. Without it, [5] uses a '
              'generated 256x256 checkerboard test pattern.')
     parser.add_argument(
+        '--text', metavar='STRING', default=None,
+        help='Custom string for stimulus type [6], added to the [B]/[N] '
+             'cycle. Monical has no on-screen text entry (keyboard-only, no '
+             'widgets), so a custom string comes in here.')
+    parser.add_argument(
         '--preset', metavar='PATH', default=None,
         help='Preset JSON saved with [P]. Restores the knobs and preselects '
              'the stimulus type it was saved from.')
@@ -1233,6 +1368,7 @@ def main(argv=None):
     session_slug = timestamp_slug(session_started)
     out_path = session_out_path(session_slug)
 
+    text_presets = list(TEXT_PRESETS)
     preset = load_preset(args.preset) if args.preset else {}
     preset_name = os.path.basename(args.preset) if args.preset else ''
 
@@ -1263,6 +1399,9 @@ def main(argv=None):
         print("WARNING: could not measure refresh rate; assuming 60.00 Hz. "
               "Frame-count frequencies will NOT be the stated values.")
 
+    if monitor_dimension_suspect(screen_height_cm):
+        print(monitor_warning_text(screen_height_cm))
+
     # A preset opens the selector on the type it was saved from.
     preset_index = 0
     if preset.get('stimulus_type') in STIMULUS_TYPES:
@@ -1271,7 +1410,8 @@ def main(argv=None):
     stimulus_type = show_intro(win, resolution, measured_refresh, image_label,
                                out_name=os.path.basename(out_path),
                                preset_name=preset_name,
-                               selected_index=preset_index)
+                               selected_index=preset_index,
+                               warning=monitor_warning_text(screen_height_cm))
     if stimulus_type is None:
         win.close()
         print("Aborted at intro screen. Nothing written.")
@@ -1280,6 +1420,13 @@ def main(argv=None):
     state = default_state(stimulus_type)
     state['image_path'] = image_label
     state['aspect'] = resolution[0] / float(resolution[1])
+    state['win_w'], state['win_h'] = resolution
+    if args.text:
+        # A custom string joins the cycle and is selected immediately.
+        if args.text not in text_presets:
+            text_presets.append(args.text)
+        state['text_index'] = text_presets.index(args.text)
+        state['text_string'] = args.text
     if preset:
         # Applied after default_state so omitted keys keep their defaults,
         # and after stimulus_type so the operator's choice at the selector
@@ -1314,6 +1461,15 @@ def main(argv=None):
                                               state['envelope_sd'])}
                         if is_gabor else None),
             autoLog=False)
+    elif stimulus_type == STIM_TEXT:
+        # PRD 4.6. height is the universal size knob, so the letter height is
+        # the thing the degree readout describes.
+        stim = visual.TextStim(
+            win=win, text=state['text_string'], font=state['font'],
+            height=state['size'], color=[state['r'], state['g'], state['b']],
+            colorSpace='rgb', opacity=state['alpha'],
+            contrast=state['contrast'],
+            pos=(state['x_pos'], state['y_pos']), autoLog=False)
     elif stimulus_type == STIM_UNIFORM:
         stim = visual.Rect(
             win=win, width=state['size'], height=state['size'],
@@ -1474,6 +1630,21 @@ def main(argv=None):
                     move_uniformity(state, key)
                 continue
 
+            if key == HUD_TOGGLE_KEY:
+                # Hides ONLY the readout. Stimulus, fixation and the gamma
+                # patch keep drawing, so a photometer reading or a screenshot
+                # is unobstructed (PRD 8.1).
+                state['hud_visible'] = not state['hud_visible']
+                continue
+
+            if (state['stimulus_type'] == STIM_TEXT
+                    and key in (TEXT_CYCLE_FWD, TEXT_CYCLE_BACK)):
+                step = 1 if key == TEXT_CYCLE_FWD else -1
+                state['text_index'] = ((state['text_index'] + step)
+                                       % len(text_presets))
+                state['text_string'] = text_presets[state['text_index']]
+                continue
+
             if key == 'p':
                 path = save_preset(state, timestamp_slug())
                 flash_text = 'Preset saved: {}'.format(os.path.basename(path))
@@ -1568,6 +1739,12 @@ def main(argv=None):
                 stim.height = state['size']
                 stim.fillColor = [state['r'], state['g'], state['b']]
                 stim.opacity = state['alpha']
+            elif stimulus_type == STIM_TEXT:
+                # TextStim sizes by `height` (the letter height), not `size`.
+                stim.height = state['size']
+                stim.text = state['text_string']
+                stim.color = [state['r'], state['g'], state['b']]
+                stim.opacity = state['alpha']
             else:
                 stim.size = state['size']
             if stimulus_type in (STIM_GABOR, STIM_GRATING):
@@ -1625,11 +1802,13 @@ def main(argv=None):
         if mode not in FIXATION_HIDDEN_MODES:
             fixation.draw()
 
-        hud.text = build_hud(state, resolution, measured_refresh,
-                             rolling_hz, screen_height_cm,
-                             sd_ms=rolling_sd_ms, drops=dropped_frames,
-                             sweep=sweep)
-        hud.draw()
+        if state['hud_visible']:
+            hud.text = build_hud(state, resolution, measured_refresh,
+                                 rolling_hz, screen_height_cm,
+                                 sd_ms=rolling_sd_ms, drops=dropped_frames,
+                                 sweep=sweep,
+                                 out_name=os.path.basename(out_path))
+            hud.draw()
 
         if flash_frames > 0:
             flash.text = flash_text
