@@ -274,6 +274,7 @@ MONICAL -- Monitor Calibration Tool  v0.1
 Monitor:    1920 x 1080  @  239.97 Hz
 PsychoPy:   2026.2.2
 Plugin:     psychopy_visionscience  [OK]
+Output:     monical_2026-09-18_143201.json
 
 SELECT STIMULUS TYPE:
     [1] Radial checkerboard (SSVEP standard)
@@ -281,6 +282,7 @@ SELECT STIMULUS TYPE:
     [3] Sinusoidal grating (contrast/SF tuning)
     [4] Uniform patch (color/luminance calibration)
     [5] Custom PNG (your own texture)
+    [6] Text / letter string (reading/crowding)
 
 1. Gamma calibrate first [G]. Grating luminance is only
    meaningful on a linearized display.
@@ -296,7 +298,8 @@ KNOBS: [Z/X] SF   [R/T] orientation   [E/W] phase   [D/A] SD
 MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz
        [5] custom Hz  [G] gamma steps  [8] spatial uniformity
        [7] toggles DUAL (two copies at +/-X, same flicker)
-[S] snapshot   [Q] quit (saves final state)
+[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma
+[Q] quit (saves final state)
 
 Press SPACE to begin."""
 
@@ -346,8 +349,9 @@ def main():
 
     # 6 lines, longest 105 chars: 8.2pt keeps it inside 800px.
     save(text_screen(HUD_TEXT, 8.2), 'hud_example.png', TEXT_BG)
-    # 31 lines: 9.2pt at 1.22 spacing fills the canvas without overflowing it.
-    save(text_screen(INTRO_TEXT, 9.2, linespacing=1.22),
+    # 33 lines: 8.0pt at 1.18 spacing fits 800x500. Overflowing text makes
+    # bbox_inches='tight' GROW the saved image instead of clipping it.
+    save(text_screen(INTRO_TEXT, 8.0, linespacing=1.18),
          'intro_screen.png', TEXT_BG)
 
     print('Done: {} images.'.format(len(STIMULI) + 3))
