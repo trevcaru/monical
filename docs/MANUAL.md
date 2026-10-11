@@ -108,8 +108,13 @@ until you fix the width in PsychoPy Monitor Center (§8).
 | Background gray | `PAGEUP` / `PAGEDN` | ±0.001 | −1.0 to 1.0 | hold |
 | Size | `+` / `-` | ±0.01 | 0.01 to 2.0 | single press |
 | Contrast | `C` / `V` | ±0.001 | 0.0 to 1.0 | hold |
-| Custom frequency | `F` / `J` | ±1 Hz | 1 to 120 | single press |
+| Custom flicker (mode 5) | `F` / `J` | ±1 frame | 2 frames to round(refresh) frames | hold |
 | Viewing distance | `;` / `'` | ±1 cm | 1 to 500 | single press |
+
+Custom flicker is a cycle length in **whole frames**. `F` raises the rate (one
+frame fewer) and `J` lowers it, so every press changes the realized Hz. It
+starts at the frame count nearest 15 Hz. The range runs from 2 frames
+(refresh/2, 30 Hz on a 60 Hz panel) to about 1 Hz.
 
 Arrows move the stimulus; the page keys adjust the background behind it. The
 first key of each pair increases the value. Size also accepts the numpad `+`
@@ -136,7 +141,7 @@ full screen height), color and contrast in `rgb` (−1 = black, 0 = mid-gray,
 | `2` | Static OFF — background and fixation only |
 | `3` | Flicker 15 Hz |
 | `4` | Flicker 20 Hz |
-| `5` | Flicker at the current custom frequency |
+| `5` | Flicker at the custom frame count (`F` / `J`) |
 | `G` | Gamma steps — fullscreen patch, 11 levels |
 | `7` | Dual stimulus — toggle, not a mode |
 | `8` | Spatial uniformity — patch on a 3×3 grid |
@@ -334,17 +339,21 @@ Produces the 11 points you enter into PsychoPy Monitor Center.
 1. Put a photodiode on the stimulus. Press `1` first to confirm it is aimed
    correctly.
 2. Press `3` (15 Hz) or `4` (20 Hz). **Read the realized frequency from HUD
-   line 4, not the mode name.** It shows `Freq: 15.00 Hz (16 frames, 50%
-   duty)` — frames per cycle, and the ON share of that cycle.
-3. For any other rate, set it with `F` / `J` and press `5`.
-4. Confirm the scope trace matches the realized Hz and that the duty cycle is
-   symmetric.
+   line 4, not the mode name.** It shows `Freq: 15.00 Hz (16 fr, 8 on/8 off)`:
+   the frames per cycle and how many are ON and OFF.
+3. For any other rate, press `5` and step the frame count with `F` / `J`
+   (hold to scroll). Each press is one frame, so each press is a new rate.
+4. Confirm the scope trace matches the realized Hz and the on/off split.
 
 Frequencies are integer frame counts, so only divisors of the refresh rate are
 exactly achievable. At 240 Hz, 15 Hz is 16 frames and 20 Hz is 12 — both exact
 and symmetric. At 60 Hz the grid is coarse and odd counts are asymmetric:
-20 Hz becomes 3 frames, 1 on and 2 off, a 33% duty cycle. Requesting 17 Hz at
-60 Hz yields 4 frames — about 15 Hz. Always transcribe the realized value.
+20 Hz becomes 3 frames, 1 on and 2 off, marked `ASYM` on the readout. At
+144 Hz, mode `3` is 10 frames (14.40 Hz) and mode `4` is 7 frames (20.57 Hz,
+`ASYM`). Always transcribe the realized value.
+
+All of these use the refresh measured once at startup, the same figure on
+the intro screen, not the rolling rate on line 1.
 
 ### d) Spatial uniformity check
 
@@ -399,7 +408,11 @@ a different type before `SPACE` — your choice at the selector wins.
 A preset holds the stimulus settings, not the rig: window aspect, the
 `--image` path, and the live snapshot list are excluded. Presets are
 forward and backward compatible — missing keys fall back to defaults, and keys
-this version does not recognise are ignored with a console note. Values are
+this version does not recognise are ignored with a console note. Mode `5` is
+saved as a frame count plus the refresh it was saved at. On a panel more than
+1% faster or slower, it converts to the nearest frame count for the same
+rate. An older preset's `custom_freq_hz` converts the same way. Both print the
+old and new rate. Values are
 checked on load: anything out of range is clamped (wedges are also rounded to
 an even number, 7 becoming 8), and each correction prints one console line. A corrupt
 preset prints an error and the session continues with defaults rather than
@@ -503,7 +516,7 @@ measurements. Nothing ever reads it back; it exists for you to read.
   "background_gray": 0.012,
   "disc_size": 0.225,
   "contrast": 1.0,
-  "custom_frequency_hz": 15,
+  "custom_frequency_hz": 15.0,
   "visual_angle_deg": 6.43,
   "eccentricity_deg": 28.57,
   "stimulus_specific": {
@@ -535,8 +548,14 @@ nothing you dialed in is lost to rounding.
 | `text` | `text_string`, `text_preset_index`, `letter_spacing`, `rotation_deg`, `font_family`, `font_requested`, `font_rendered`, `font_fallback`, `alpha`, `r`, `g`, `b` |
 
 Plus, depending on mode: `gamma_level` and `gamma_step_index` in gamma steps;
-`grid_position`, `grid_x`, `grid_y` (and `patch_*`) in spatial uniformity;
-`flicker_frames_per_cycle` and `flicker_realized_hz` in any flicker mode.
+`grid_position`, `grid_x`, `grid_y` (and `patch_*`) in spatial uniformity.
+
+Every snapshot also carries the flicker cycle: `flicker_frames`,
+`flicker_on_frames`, `flicker_off_frames`, `flicker_realized_hz` and
+`refresh_hz_used`. These describe the active flicker mode, or mode `5`'s
+setting when none is on (`flicker_active` says which).
+`custom_frequency_hz` now holds mode `5`'s *realized* rate. Older files wrote
+`flicker_frames_per_cycle`, and only while flickering.
 
 ### Using it in experiment code
 
@@ -547,10 +566,10 @@ ECCENTRICITY   = 0.66      # x_position
 STIM_SIZE      = 0.225     # disc_size
 BACKGROUND     = 0.012     # background_gray, matched to stimulus ON
 CONTRAST       = 1.0       # contrast
-FLICKER_FRAMES = 16        # flicker_frames_per_cycle, NOT 240/15
+FLICKER_FRAMES = 16        # flicker_frames, NOT 240/15
 ```
 
-Take the frame count from `flicker_frames_per_cycle` rather than recomputing
+Take the frame count from `flicker_frames` rather than recomputing
 it from a nominal refresh rate. That count is what produced the waveform you
 verified on the scope.
 
@@ -564,7 +583,7 @@ Five lines, bottom center, updated every frame.
 1920x1080 | 239.94 Hz (σ=0.12ms) | Drops: 0 | PsychoPy 2026.2.2 | Dist: 40 cm
 Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
 X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (243px, 10.61 deg) | Ecc: 28.57 deg
-BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 frames, 50% duty, idle)
+BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 fr, 8 on/8 off) idle
 SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
 ```
 
@@ -595,10 +614,10 @@ dimensions are unknown.
 
 **Line 4 — luminance and timing.** Background and contrast to three decimals.
 `Freq` is always the **realized** frequency from the integer frame count, with
-the count and the duty cycle — the ON share, `(frames // 2) / frames`. Only an
-even frame count can give 50%; an odd one puts the shorter half ON, so 3 frames
-reads `33% duty`. In a non-flicker mode it is marked `idle` and shows what the
-current custom setting *would* produce.
+the count and the ON/OFF split, `frames // 2` ON. An odd count cannot split
+evenly, so the shorter half is ON and the line ends `ASYM`:
+`Freq: 48.00 Hz (5 fr, 2 on/3 off) ASYM`. In a non-flicker mode it ends
+`idle` and shows what mode `5` *would* produce.
 
 **Line 5 — stimulus-specific.** The active key legend's values. For a Gabor it
 shows the envelope SD in height units plus the PsychoPy `mask sd` it converts
@@ -610,12 +629,12 @@ Below the readout, in smaller dimmer text, one line that is **always visible —
 it does not hide with `H`**:
 
 ```
-[H] Text: ON | [M] Menu: OFF | [F/J] Custom Hz: 15 | Mode: static_on | File: monical_2026-09-18_143201.json
+[H] Text: ON | [M] Menu: OFF | [F/J] Custom: 15.00 Hz (16 fr, 8 on/8 off) | Mode: static_on | File: monical_2026-09-18_143201.json
 ```
 
-Both toggle states, the custom frequency with the keys that change it, the
-mode, and where the session is writing. With the readout hidden you can still
-see all of it. The `[F/J] Custom Hz` field is the only place on screen that
+Both toggle states, mode `5`'s rate and frames with the keys that change them,
+the mode, and where the session is writing. With the readout hidden you can
+still see all of it. The `[F/J] Custom` field is the only place on screen that
 tells you how to change the rate mode `5` flickers at.
 
 ### The keybinding card

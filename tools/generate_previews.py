@@ -264,9 +264,9 @@ HUD_TEXT = u"""\
 1920x1080 | 239.94 Hz (σ=0.12ms) | Drops: 0 | PsychoPy 2026.2.2 | Dist: 40 cm
 Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
 X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (243px, 10.61 deg) | Ecc: 28.57 deg
-BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 frames, 50% duty, idle)
+BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 fr, 8 on/8 off) idle
 SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
-[H] Text: ON | [M] Menu: OFF | [F/J] Custom Hz: 15 | Mode: static_on | File: monical_2026-09-18_143201.json"""
+[H] Text: ON | [M] Menu: OFF | [F/J] Custom: 15.00 Hz (16 fr, 8 on/8 off) | Mode: static_on | File: monical_2026-09-18_143201.json"""
 
 INTRO_TEXT = u"""\
 MONICAL -- Monitor Calibration Tool  v0.1
@@ -347,8 +347,9 @@ def main():
 
     save(text_stimulus_figure(), 'text.png', PSYCHOPY_GRAY)
 
-    # 6 lines, longest 105 chars: 8.2pt keeps it inside 800px.
-    save(text_screen(HUD_TEXT, 8.2), 'hud_example.png', TEXT_BG)
+    # 6 lines, longest 130 chars (the status bar): 6.8pt keeps it inside
+    # 800px.
+    save(text_screen(HUD_TEXT, 6.8), 'hud_example.png', TEXT_BG)
     # 33 lines: 8.0pt at 1.18 spacing fits 800x500. Overflowing text makes
     # bbox_inches='tight' GROW the saved image instead of clipping it.
     save(text_screen(INTRO_TEXT, 8.0, linespacing=1.18),

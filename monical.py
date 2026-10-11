@@ -251,7 +251,8 @@ STEP_POS = 0.005                  # fine placement; auto-repeats to cover range
 STEP_BG = 0.001                   # fine, for photometer luminance matching
 STEP_SIZE = 0.01
 STEP_CONTRAST = 0.001             # fine, for photometer luminance matching
-STEP_FREQ = 1
+STEP_FRAMES = 1
+DEFAULT_CUSTOM_HZ = 15            # mode 5 starts at the nearest frame count
 STEP_DISTANCE = 1
 
 KNOBS = {
@@ -270,9 +271,12 @@ KNOBS = {
     'c':            ('contrast', +STEP_CONTRAST, 0.0, 1.0, 'float'),
     'v':            ('contrast', -STEP_CONTRAST, 0.0, 1.0, 'float'),
     # [F/J], not the original [F/H]: [H] now toggles the readout, and F and J
-    # are the two home-position index keys.
-    'f':            ('custom_freq_hz', +STEP_FREQ, 1, 120, 'int'),
-    'j':            ('custom_freq_hz', -STEP_FREQ, 1, 120, 'int'),
+    # are the two home-position index keys. Mode 5 steps whole frames, so
+    # every press changes the realised rate. F still raises Hz, which means
+    # FEWER frames. The upper limit (~1 Hz) depends on the refresh, so
+    # knob_table fills it in.
+    'f':            ('flicker_frames', -STEP_FRAMES, 2, None, 'int'),
+    'j':            ('flicker_frames', +STEP_FRAMES, 2, None, 'int'),
     'semicolon':    ('viewing_distance_cm', +STEP_DISTANCE, 1, 500, 'int'),
     'apostrophe':   ('viewing_distance_cm', -STEP_DISTANCE, 1, 500, 'int'),
 }
@@ -369,7 +373,8 @@ STIM_KNOBS = {
 # -- size, frequency, distance -- stay single-press.
 REPEAT_KEYS = ('left', 'right', 'up', 'down',      # x / y position
                'pageup', 'pagedown',               # background gray
-               'c', 'v')                           # contrast
+               'c', 'v',                           # contrast
+               'f', 'j')                           # custom flicker frames
 # ...plus the colour channels and letter spacing, which share the 0.001 step
 # and so the same problem. Alpha is 0.01 and stays single-press.
 REPEAT_KEYS_BY_STIM = {
@@ -431,19 +436,19 @@ def hz_to_frames(hz, refresh_hz):
     return max(2, int(round(refresh_hz / float(hz))))
 
 
+def max_flicker_frames(refresh_hz):
+    """Longest custom cycle: about 1 Hz at this refresh."""
+    return max(2, int(round(refresh_hz)))
+
+
+def flicker_split(frames):
+    """(on, off) frames per cycle -- the split stim_is_on draws."""
+    return frames // 2, frames - frames // 2
+
+
 def frames_to_hz(frames, refresh_hz):
     """Realised Hz. Never a rounded literal -- always derived from frames."""
     return refresh_hz / float(frames)
-
-
-def duty_percent(frames):
-    """ON share of the cycle, from the same `frames // 2` stim_is_on uses.
-
-    Only even frame counts give 50%. An odd count cannot split evenly, so the
-    ON half is the shorter one: 3 frames is 1 on and 2 off, 33%. That is the
-    locked flicker logic showing through, not a rounding artefact.
-    """
-    return (frames // 2) / float(frames) * 100.0
 
 
 def uniformity_rc(name):
@@ -583,14 +588,20 @@ def mode_frames(state, refresh_hz):
     if mode in FLICKER_HZ:
         return hz_to_frames(FLICKER_HZ[mode], refresh_hz)
     if mode == MODE_FLICKER_CUSTOM:
-        return hz_to_frames(state['custom_freq_hz'], refresh_hz)
+        return state['flicker_frames']
     return None
 
 
-def knob_table(stimulus_type):
-    """Universal knobs plus the chosen type's own. Built once per session."""
+def knob_table(stimulus_type, refresh_hz=60.0):
+    """Universal knobs plus the chosen type's own. Built once per session.
+
+    The custom flicker range is the one refresh-dependent limit.
+    """
     table = dict(KNOBS)
     table.update(STIM_KNOBS.get(stimulus_type, {}))
+    for key in ('f', 'j'):
+        field, delta, low, _high, kind = table[key]
+        table[key] = (field, delta, low, max_flicker_frames(refresh_hz), kind)
     return table
 
 
@@ -684,8 +695,12 @@ def repeat_tick(state, table, repeat_names, down, held_since, repeat_count,
 # STATE
 # =============================================================================
 
-def default_state(stimulus_type):
-    """Every adjustable parameter in one dict, at its PRD default."""
+def default_state(stimulus_type, refresh_hz=60.0):
+    """Every adjustable parameter in one dict, at its PRD default.
+
+    `refresh_hz` is the measured refresh, which mode 5's default frame count
+    and its presets are relative to.
+    """
     # Text starts white so the glyphs are visible at launch; rgb 0.0 is the
     # same mid-gray as the default background, which rendered them invisible.
     # The uniform patch keeps 0.0 -- there, mid-gray IS the calibration
@@ -698,7 +713,10 @@ def default_state(stimulus_type):
         'bg_gray': 0.0,
         'size': 0.225,
         'contrast': 1.0,
-        'custom_freq_hz': 15,
+        # Mode 5 cycle length in whole frames (PRD 6.1). Saved in presets
+        # with refresh_hz, so a preset can tell when the panel changed.
+        'flicker_frames': hz_to_frames(DEFAULT_CUSTOM_HZ, refresh_hz),
+        'refresh_hz': refresh_hz,
         'viewing_distance_cm': 40,
 
         # Selection
@@ -1117,7 +1135,7 @@ WORKFLOWS = {
         "",
         "KNOBS: [Z/X] rings   [R/T] wedges   [ARROWS] move X/Y",
         "       [PAGEUP/PAGEDN] BG   [+/-] size   [C/V] contrast",
-        "       [F/J] custom Hz",
+        "       [F/J] custom flicker, whole frames",
     ],
     STIM_GABOR: [
         "1. Gamma calibrate first [G]. Grating luminance is only",
@@ -1375,23 +1393,36 @@ def stim_line(state, sweep=None):
     return 'No stimulus-specific parameters'
 
 
+def flicker_text(frames, refresh_hz):
+    """'48.00 Hz (5 fr, 2 on/3 off) ASYM' -- realised rate and split.
+
+    ASYM flags an odd count: it cannot split evenly, so ON is the shorter
+    half (stim_is_on's frames // 2).
+    """
+    on, off = flicker_split(frames)
+    return '{:.2f} Hz ({} fr, {} on/{} off){}'.format(
+        frames_to_hz(frames, refresh_hz), frames, on, off,
+        ' ASYM' if on != off else '')
+
+
 def build_status_bar(state, out_name=''):
     """PRD 8.2. One dim line, always drawn, never hidden by [H].
 
-    Carries the two toggle states and the custom-frequency value with its
+    Carries the two toggle states and the custom-flicker setting with its
     keys -- mode 5 is otherwise undiscoverable, since nothing else on screen
     says how to change the rate it flickers at.
     """
     name = out_name or '-'
     if len(name) > STATUS_NAME_CHARS:
         name = '...' + name[-(STATUS_NAME_CHARS - 3):]
-    return ('[{}] Text: {} | [{}] Menu: {} | [F/J] Custom Hz: {} | '
+    return ('[{}] Text: {} | [{}] Menu: {} | [F/J] Custom: {} | '
             'Mode: {} | File: {}').format(
                 HUD_TOGGLE_KEY.upper(),
                 'ON' if state['hud_visible'] else 'OFF',
                 MENU_TOGGLE_KEY.upper(),
                 'ON' if state['menu_visible'] else 'OFF',
-                state['custom_freq_hz'], state['mode'], name)
+                flicker_text(state['flicker_frames'], state['refresh_hz']),
+                state['mode'], name)
 
 
 MENU_STIM_KEYS = {
@@ -1416,7 +1447,7 @@ def build_menu_text(state):
         '',
         'MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position',
         'DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast',
-        "FREQUENCY: F/J = Custom Hz | ;/' = Viewing distance",
+        "FREQUENCY: F/J = Custom flicker +/-1 frame | ;/' = Viewing distance",
         'MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom',
         '           G=Gamma  7=Dual  8=Uniformity',
         'ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot',
@@ -1467,12 +1498,10 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
     # reads it as a live measurement.
     frames = mode_frames(state, refresh_hz)
     if frames is None:
-        idle = hz_to_frames(state['custom_freq_hz'], refresh_hz)
-        freq_text = 'Freq: {:.2f} Hz ({} frames, {:.0f}% duty, idle)'.format(
-            frames_to_hz(idle, refresh_hz), idle, duty_percent(idle))
+        freq_text = 'Freq: {} idle'.format(
+            flicker_text(state['flicker_frames'], refresh_hz))
     else:
-        freq_text = 'Freq: {:.2f} Hz ({} frames, {:.0f}% duty)'.format(
-            frames_to_hz(frames, refresh_hz), frames, duty_percent(frames))
+        freq_text = 'Freq: {}'.format(flicker_text(frames, refresh_hz))
 
     return '\n'.join([
         # Rolling rate, not the startup measurement: a panel that is dropping
@@ -1593,7 +1622,12 @@ def state_record(state, screen_height_cm, refresh_hz=None,
                              state['viewing_distance_cm'])
     ecc = eccentricity_deg(state['x_pos'], screen_height_cm,
                            state['viewing_distance_cm'])
-    frames = None if refresh_hz is None else mode_frames(state, refresh_hz)
+    refresh = state['refresh_hz'] if refresh_hz is None else refresh_hz
+    frames = mode_frames(state, refresh)
+    active = frames is not None
+    if not active:
+        frames = state['flicker_frames']
+    on, off = flicker_split(frames)
     record = {
         'snapshot_number': snapshot_number,
         'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
@@ -1608,17 +1642,25 @@ def state_record(state, screen_height_cm, refresh_hz=None,
         'background_gray': round(state['bg_gray'], STORE_DP),
         'disc_size': round(state['size'], STORE_DP),
         'contrast': round(state['contrast'], STORE_DP),
-        'custom_frequency_hz': state['custom_freq_hz'],
+        # Back-compat: the REALISED rate of mode 5's frame count, no longer
+        # a requested integer (PRD 3.2).
+        'custom_frequency_hz': round(
+            frames_to_hz(state['flicker_frames'], refresh), 3),
         'visual_angle_deg': None if angle is None else round(angle, 2),
         'eccentricity_deg': None if ecc is None else round(ecc, 2),
         'stimulus_specific': stimulus_specific(state),
     }
-    # Only meaningful while a flicker mode is active; the realised rate is
-    # what the frame count actually delivers, never the requested value.
-    if frames is not None:
-        record['flicker_frames_per_cycle'] = frames
-        record['flicker_realized_hz'] = round(
-            frames_to_hz(frames, refresh_hz), 3)
+    # The active flicker mode's cycle, or mode 5's standing setting when no
+    # flicker mode is on (flicker_active says which). The rate is what the
+    # frame count delivers at refresh_hz_used, never a requested value.
+    record.update({
+        'flicker_active': active,
+        'flicker_frames': frames,
+        'flicker_on_frames': on,
+        'flicker_off_frames': off,
+        'flicker_realized_hz': round(frames_to_hz(frames, refresh), 3),
+        'refresh_hz_used': round(refresh, 3),
+    })
     return record
 
 
@@ -1830,7 +1872,7 @@ def load_preset(path):
     return loaded
 
 
-def param_ranges():
+def param_ranges(refresh_hz=60.0):
     """field -> (low, high, kind) for every knob-driven parameter.
 
     Built from the knob tables, so a range is still defined in one place, plus
@@ -1838,7 +1880,7 @@ def param_ranges():
     have no range; their valid values are CHOICES.
     """
     ranges = {}
-    for table in [KNOBS] + list(STIM_KNOBS.values()):
+    for table in [knob_table(None, refresh_hz)] + list(STIM_KNOBS.values()):
         for field, _delta, low, high, kind in table.values():
             ranges[field] = (low, high, kind)
     ranges['gamma_step_index'] = (0, len(GAMMA_LEVELS) - 1, 'int')
@@ -1875,6 +1917,45 @@ def sanitize_param(field, value, default, ranges):
     return fixed, ('' if fixed == value else reason)
 
 
+REFRESH_TOLERANCE = 0.01          # presets re-derive frames beyond 1% drift
+
+
+def is_number(value):
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def preset_flicker_frames(loaded, refresh_hz):
+    """Mode 5 frame count a preset asks for at THIS refresh, or None.
+
+    New presets carry flicker_frames and the refresh they were saved at. On a
+    panel more than 1% faster or slower the rate, not the count, is what was
+    dialled in, so it is re-derived. Old presets carry only custom_freq_hz.
+    """
+    frames = loaded.get('flicker_frames')
+    saved_refresh = loaded.get('refresh_hz')
+    old_hz = loaded.get('custom_freq_hz')
+    if is_number(frames) and frames > 0:
+        if (is_number(saved_refresh) and saved_refresh > 0 and
+                abs(saved_refresh - refresh_hz) / refresh_hz >
+                REFRESH_TOLERANCE):
+            new = hz_to_frames(saved_refresh / frames, refresh_hz)
+            print("Preset: saved at {:.2f} Hz refresh, now {:.2f} Hz -- "
+                  "custom flicker {} fr ({:.2f} Hz) -> {} fr ({:.2f} Hz)".format(
+                      saved_refresh, refresh_hz, frames,
+                      frames_to_hz(frames, saved_refresh), new,
+                      frames_to_hz(new, refresh_hz)))
+            return new
+        return frames
+    if frames is None and is_number(old_hz) and old_hz > 0:
+        new = hz_to_frames(old_hz, refresh_hz)
+        print("Preset: custom_freq_hz {} (old format) -> {} fr ({:.2f} Hz "
+              "realised at {:.2f} Hz refresh)".format(
+                  old_hz, new, frames_to_hz(new, refresh_hz), refresh_hz))
+        return new
+    return frames                 # absent, or junk for sanitize_param
+
+
 def apply_preset(state, loaded, text_presets=None):
     """Overlay a preset onto a default state. Returns the keys applied.
 
@@ -1886,7 +1967,14 @@ def apply_preset(state, loaded, text_presets=None):
     preset is a hand-editable file, and an out-of-range value would otherwise
     reach the stimulus constructor unchecked.
     """
-    ranges = param_ranges()
+    loaded = dict(loaded)
+    frames = preset_flicker_frames(loaded, state['refresh_hz'])
+    # refresh_hz describes the rig a preset was saved on, never this one.
+    for key in ('flicker_frames', 'refresh_hz', 'custom_freq_hz'):
+        loaded.pop(key, None)
+    if frames is not None:
+        loaded['flicker_frames'] = frames
+    ranges = param_ranges(state['refresh_hz'])
     applied, ignored = [], []
     for key, value in loaded.items():
         if key in PRESET_EXCLUDE or key not in state:
@@ -2005,7 +2093,7 @@ def main(argv=None):
         print("Aborted at intro screen. Nothing written.")
         core.quit()
 
-    state = default_state(stimulus_type)
+    state = default_state(stimulus_type, measured_refresh)
     state['image_path'] = image_label
     state['aspect'] = resolution[0] / float(resolution[1])
     state['win_w'], state['win_h'] = resolution
@@ -2019,7 +2107,7 @@ def main(argv=None):
         state['stimulus_type'] = stimulus_type
         print("Preset {}: applied {} value(s).".format(preset_name,
                                                        len(applied)))
-    table = knob_table(state['stimulus_type'])
+    table = knob_table(state['stimulus_type'], measured_refresh)
 
     # ---- Stimuli (PRD 4) -----------------------------------------------------
     stim = None

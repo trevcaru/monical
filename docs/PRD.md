@@ -114,7 +114,7 @@ Contains:
       "background_gray": 0.012,
       "disc_size": 0.225,
       "contrast": 1.000,
-      "custom_frequency_hz": 15,
+      "custom_frequency_hz": 15.0,
       "visual_angle_deg": 6.43,
       "eccentricity_deg": 28.57,
       "stimulus_specific": {
@@ -123,7 +123,13 @@ Contains:
         "radialCycles": 2.0,
         "angularCycles": 8.0,
         "radialPhase": 0.25
-      }
+      },
+      "flicker_active": false,
+      "flicker_frames": 16,
+      "flicker_on_frames": 8,
+      "flicker_off_frames": 8,
+      "flicker_realized_hz": 15.0,
+      "refresh_hz_used": 239.97
     }
   ],
   "final": { ... }
@@ -132,7 +138,9 @@ Contains:
 
 `stimulus_specific` holds per-type parameters (rings and wedges with the RadialStim kwargs they derive, SF, ori, phase, SD, R, G, B, alpha — whichever apply), plus the mode-local values: `gamma_level` in gamma steps, `grid_position` and coordinates in spatial uniformity.
 
-Snapshots taken in a flicker mode also carry `flicker_frames_per_cycle` and `flicker_realized_hz`.
+Every snapshot and the final record carry the flicker cycle: `flicker_frames`, `flicker_on_frames`, `flicker_off_frames`, `flicker_realized_hz` and `refresh_hz_used`. These describe the active flicker mode (3, 4 or 5) when one is on, and mode 5's standing setting otherwise; `flicker_active` says which. `refresh_hz_used` is the startup refresh measurement that every frame count is built on (§6.1). Earlier versions wrote `flicker_frames_per_cycle`, only in flicker modes.
+
+`custom_frequency_hz` is kept for back-compatibility, but it now holds the **realised** rate of mode 5's frame count (e.g. `14.4` at 144 Hz), not a requested integer.
 
 **Refresh rate vs frame rate.** `startup_refresh_hz` is the one-shot `getMsPerFrame` measurement taken before the intro screen. `final_rolling_refresh_hz` is the mean of actual flip-to-flip intervals over the last 120 frames, which is a *loop* rate — it equals the display's refresh rate only while vsync holds `flip()` to the retrace, which is why `vsync` is recorded beside it. If the two figures diverge by more than 5 Hz the tool warns on the console, since that usually means the startup measurement fell back to a default and every frame-count frequency in the session is built on a wrong number.
 
@@ -374,14 +382,16 @@ Active in all stimulus modes.
 | Background gray | `[PAGEUP/PAGEDN]` | ±0.001 | 0.000 | -1.0–1.0 |
 | Disc/patch size | `[+/-]` | ±0.01 | 0.225 | 0.01–2.0 |
 | Contrast | `[C/V]` | ±0.001 | 1.000 | 0.0–1.0 |
-| Custom frequency | `[F/J]` | ±1 Hz | 15 | 1–120 |
+| Custom flicker (mode 5) | `[F/J]` | ±1 frame | nearest to 15 Hz | 2 frames (refresh/2) to round(refresh) frames (~1 Hz) |
 | Viewing distance | `[;/']` | ±1 cm | 40 | 1–500 |
 
 Arrows move the stimulus; the page keys adjust the background behind it.
 
+Custom flicker is stored as a cycle length in whole frames, not Hz. `[F]` raises the rate, which means one frame *fewer*; `[J]` lowers it. Because the frame count is what changes, every press moves the realised rate. A Hz knob rounding to frames left most presses doing nothing: at 60 Hz, 106 of 119 steps of the old 1–120 Hz knob landed on an unchanged count.
+
 ### 5.1 Key repeat
 
-X position, Y position, background gray, contrast, and color channels (R/G/B): after 1 second of holding the key, auto-repeat at ~60 increments per second — roughly one increment per frame at 60 Hz, one every four frames at 240 Hz. The coarser knobs (size, custom frequency, viewing distance) are single-press.
+X position, Y position, background gray, contrast, color channels (R/G/B), text letter spacing and custom flicker frames (`[F/J]`): after 1 second of holding the key, auto-repeat at ~60 increments per second — roughly one increment per frame at 60 Hz, one every four frames at 240 Hz. Custom flicker repeats because its range runs to hundreds of frames on a fast panel. The coarser knobs (size, viewing distance) are single-press.
 
 Repeat is measured against the moment the key went down, not against the last increment emitted. An increment can only land on a frame boundary, so "wait 1/rate since the last one" rounds every interval up to a whole frame and beats the realized rate below the target; accumulating against the hold start lets a short interval compensate for a long one.
 
@@ -406,9 +416,9 @@ Toggled by number keys. Active across all stimulus types.
 |-----|------|-------------|
 | `[1]` | Static ON | Stimulus rendered at current position, no flicker. Photometer: measure ON luminance. |
 | `[2]` | Static OFF | Background + fixation only. Photometer: measure OFF/background luminance. |
-| `[3]` | Flicker 15 Hz | 16-frame cycle at 240 Hz. Oscilloscope check. |
-| `[4]` | Flicker 20 Hz | 12-frame cycle at 240 Hz. Oscilloscope check. |
-| `[5]` | Flicker custom | Uses current custom frequency value. Shows realized Hz. |
+| `[3]` | Flicker 15 Hz | Nearest whole-frame cycle: 16 frames at 240 Hz, 4 at 60 Hz, 10 at 144 Hz (14.40 Hz). Oscilloscope check. |
+| `[4]` | Flicker 20 Hz | Nearest whole-frame cycle: 12 frames at 240 Hz, 3 at 60 Hz (1 on/2 off), 7 at 144 Hz (20.57 Hz, 3 on/4 off). Oscilloscope check. |
+| `[5]` | Flicker custom | Cycle of `[F/J]` whole frames. Shows realized Hz and the on/off split. |
 | `[G]` | Gamma steps | Full-screen uniform patch, 11 levels (0%–100%). LEFT/RIGHT to step. Fixation cross hidden. |
 | `[7]` | Dual stimulus | Two stimuli at ±X eccentricity simultaneously. Matches two-stimulus experiment layout. |
 | `[8]` | Spatial uniformity | Uniform patch movable to a 3×3 grid (center, corners, midpoints). Arrow keys move between grid positions. |
@@ -432,7 +442,9 @@ def stim_is_on(frame_idx, frames):
 
 Stateless, pure in frame_idx. Phase resets on every mode switch. Identical to the SSVEP experiment's drive logic.
 
-Custom frequency converts to nearest integer frame count at the detected refresh rate. Readout shows the realized frequency, not the requested one.
+Each cycle is `on = frames // 2` frames ON and `off = frames - on` frames OFF. An odd count is asymmetric, with the shorter half ON, and the readout marks it `ASYM`.
+
+**Which refresh.** Every frame count and every realised rate uses the refresh measured once at startup (`getMsPerFrame`, median of 120 frames; 60.00 Hz with a console warning if that fails). Modes 3 and 4 take the nearest whole-frame cycle to 15 and 20 Hz at that refresh. Mode 5 *is* a frame count, from 2 frames (refresh/2) to round(refresh) frames (~1 Hz). It defaults to the count nearest 15 Hz. The rolling rate on readout line 1 is not used for these, because a fluctuating denominator would make a fixed frame count report a wandering frequency. If the two disagree by more than 5 Hz, the console warns (§3.2). Realised Hz = refresh / frames, never a requested value.
 
 ### 6.2 Gamma steps
 
@@ -498,13 +510,13 @@ Bottom center, small monospace text, updates every frame. Adapts to the current 
 Line 1: [resolution] | [refresh Hz avg] | PsychoPy [ver] | Dist: [cm] cm
 Line 2: Mode: [name] | Stim: [type]
 Line 3: X: [val] | Y: [val] | Size: [val] ([deg]°) | Ecc: [deg]°
-Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] frames, [duty]% duty)
+Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] fr, [on] on/[off] off) [ASYM]
 Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
 ```
 
 If line 5 is wider than the screen (a long `--text` string or PNG filename), it wraps at a ` | ` boundary onto a line 6. The font never shrinks. A wrapped readout moves up half a line so its bottom edge stays clear of the status bar.
 
-Duty cycle is `(frames // 2) / frames`, the same split `stim_is_on` uses. Only an even frame count can give 50%; an odd one puts the shorter half ON, so 3 frames reads `33% duty`. In a non-flicker mode the field is marked `idle` and shows what the standing custom setting would produce.
+The on/off split is the one `stim_is_on` draws: `frames // 2` ON, the rest OFF. An odd count cannot split evenly, so it is marked `ASYM`: `Freq: 48.00 Hz (5 fr, 2 on/3 off) ASYM`. This appears in every flicker mode (3, 4 and 5). In a non-flicker mode the field ends `idle` and shows mode 5's standing setting.
 
 Line 3 carries pixel coordinates beside the height units, derived from the window:
 
@@ -529,14 +541,14 @@ Custom-frequency-down moved from `[H]` to `[J]` to free the key, so the frequenc
 A separate single line at the very bottom, below the readout, in smaller dimmer text so the two do not read as one block. **It is always drawn and does NOT hide with `[H]`.**
 
 ```
-[H] Text: ON | [M] Menu: OFF | [F/J] Custom Hz: 15 | Mode: static_on | File: monical_2026-09-18_143201.json
+[H] Text: ON | [M] Menu: OFF | [F/J] Custom: 15.00 Hz (16 fr, 8 on/8 off) | Mode: static_on | File: monical_2026-09-18_143201.json
 ```
 
 It updates live and carries:
 
 - `[H] Text: ON/OFF` — whether the readout is visible, with the key that changes it
 - `[M] Menu: ON/OFF` — whether the keybinding overlay is showing
-- `[F/J] Custom Hz` — the current custom frequency **and the keys that adjust it**. This is the discoverability mode 5 otherwise lacks: nothing else on screen says how to change the rate it flickers at
+- `[F/J] Custom` — mode 5's realised rate, frame count and on/off split, **and the keys that adjust it**. This is the discoverability mode 5 otherwise lacks: nothing else on screen says how to change the rate it flickers at
 - the mode name
 - the session output filename, truncated from the left when long
 
@@ -551,7 +563,7 @@ KEYBINDINGS -- Text / letter string
 
 MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position
 DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast
-FREQUENCY: F/J = Custom Hz | ;/' = Viewing distance
+FREQUENCY: F/J = Custom flicker +/-1 frame | ;/' = Viewing distance
 MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom
            G=Gamma  7=Dual  8=Uniformity
 ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot
@@ -637,6 +649,8 @@ A preset carries the stimulus, not the rig or the run. These keys are excluded: 
 **Compatibility is deliberate in both directions.** Keys the preset omits keep their defaults, so a preset written by an older version still loads. Keys it carries that this version no longer recognises are ignored with a console note. Neither is an error — presets outlive tool versions.
 
 **Values are sanitized on load.** Every numeric parameter is clamped to its knob range (§4, §5), whole-number knobs are rounded, orientation wraps into 0–360, and `wedges` is rounded to the nearest even number, with ties going up (7 → 8), within 2–32. Non-numeric values fall back to the default. Each correction prints one console line, for example `Preset: wedges 7 -> 8 (rounded to even, range 2-32)`.
+
+**Custom flicker in presets.** A preset stores mode 5 as `flicker_frames` together with `refresh_hz`, the refresh it was saved at. Loaded on a panel within 1% of that refresh, the frame count is used as is. Beyond 1%, the *rate* is what was dialled in, so it converts to the nearest frame count at the new refresh. A console line shows both, for example `custom flicker 16 fr (15.00 Hz) -> 4 fr (15.00 Hz)`. A preset from before frame stepping carries only `custom_freq_hz`, which converts to the nearest frame count with a console line. The saved `refresh_hz` never replaces the session's measured refresh.
 
 An unreadable or malformed preset prints an error and the session continues with defaults. A preset is a convenience; a broken one should cost you the preset, not the calibration session.
 

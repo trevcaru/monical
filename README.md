@@ -47,7 +47,7 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `PAGEUP`/`PAGEDN` | background gray ±0.001 |
 | `+`/`-` | size ±0.01 |
 | `C`/`V` | contrast ±0.001 |
-| `F`/`J` | custom frequency ±1 Hz |
+| `F`/`J` | custom flicker (mode 5) ±1 frame, so every press is a new realized rate |
 | `;`/`'` | viewing distance ±1 cm |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
 | `Z/X` / `R/T` | radial only: rings ±1 (1–20) / wedges ±2 (2–32) |
@@ -62,15 +62,15 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `B`/`N` | text type only: cycle strings (`ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO`, or built from `--text`) |
 | `M` | keybinding reference card for the current stimulus type |
 
-Position, background, contrast, the color channels and text letter spacing auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).
+Position, background, contrast, the color channels, text letter spacing and custom flicker frames auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).
 
 ## Readout
 
 ![HUD readout](docs/img/hud_example.png)
 
-Five lines, updated every frame: measured refresh with frame-interval σ and a dropped-frame counter, mode and output filename, geometry in both degrees and pixels, luminance and realized flicker rate with its duty cycle, then the active stimulus parameters. `H` hides it.
+Five lines, updated every frame: measured refresh with frame-interval σ and a dropped-frame counter, mode and output filename, geometry in both degrees and pixels, luminance and realized flicker rate with its on/off frame split, then the active stimulus parameters. `H` hides it.
 
-Below that, a dimmer status bar that **never hides** — toggle states, the custom frequency with its keys, the mode, and the output file. `M` overlays a full keybinding card for the current stimulus type.
+Below that, a dimmer status bar that **never hides** — toggle states, the custom flicker rate and frames with their keys, the mode, and the output file. `M` overlays a full keybinding card for the current stimulus type.
 
 The refresh figure is a rolling 120-frame average of real flip-to-flip intervals, not the startup measurement — if the two disagree by more than 5 Hz the tool says so, because every flicker frame count depends on getting it right.
 
