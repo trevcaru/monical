@@ -7,7 +7,7 @@ There are three layers, and they answer different questions:
 
 | Layer | Run | Answers |
 |---|---|---|
-| Automated tests | `python -m unittest discover tests` | Does the software compute and draw what it says? |
+| Automated tests | `python -m unittest discover tests` (add `MONICAL_RENDER=1` for render tests) | Does the software compute and draw what it says? |
 | Frame-timing benchmark | `python monical.py --bench` | Can this machine hold every frame at each copy count? (MANUAL §5i) |
 | This protocol | photometer, photodiode + scope, by hand | Does this display emit what was drawn? |
 
@@ -15,11 +15,22 @@ There are three layers, and they answer different questions:
 
 ## Automated tests
 
-Run them after any change to `monical.py`, on any machine. They need PsychoPy
-only; `tests/test_render.py` also needs a display with OpenGL and skips itself
-cleanly without one (or with `MONICAL_SKIP_RENDER=1`).
+Run the logic tests after any change to `monical.py`, on any machine; they
+need PsychoPy only and take about 2 s. The render tests are opt-in: set
+`MONICAL_RENDER=1` when drawing or stimulus construction code changes. They
+need a display with OpenGL and take about 40 s.
 
-**`tests/test_logic.py`** — no window:
+```bash
+python -m unittest discover tests                    # logic only
+MONICAL_RENDER=1 python -m unittest discover tests   # logic + render
+```
+
+The render tests run with Python's garbage collector off: in that harness,
+collecting PsychoPy/pyglet objects caused intermittent GL access violations.
+It has never been seen in the app, and the crash log (MANUAL §8) would catch
+it if it were.
+
+**`tests/test_logic.py`** — no window, the default run:
 
 - Flicker: the `stim_is_on` formula for every count from 2 to 240, whole-frame
   stepping with no dead presses at 60, 144 and 240 Hz, the on/off split and
@@ -37,7 +48,8 @@ cleanly without one (or with `MONICAL_SKIP_RENDER=1`).
 - Output: no absolute paths in the session header, `--image` fallback,
   screen text, the snapshot record.
 
-**`tests/test_render.py`** — hidden window, pixel comparisons:
+**`tests/test_render.py`** — `MONICAL_RENDER=1`, hidden window, pixel
+comparisons:
 
 - The default radial checkerboard against the original v1 construction
   (0 differing pixels) and N equal-width rings for N = 1–20.

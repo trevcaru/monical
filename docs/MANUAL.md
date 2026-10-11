@@ -857,6 +857,13 @@ against a tape measure; if a 34-inch ultrawide reports `monitor_height_cm:
 12.56`, the stock value is in use. Fix it in PsychoPy Monitor Center by
 setting the real screen width for `testMonitor`, then restart.
 
+**Crash log.** Each run opens `monical_crash_YYYY-MM-DD_HHMMSS.log` beside
+the script, with the same timestamp as the session file. If Monical is killed
+by a native crash -- in the graphics driver, say -- the Python stack of every
+thread is written there before the process dies. On a normal exit the empty
+file is deleted, so one that remains means a crash. Include it in any bug
+report.
+
 **Dropped frames.** The Drops counter on line 1 climbing during a measurement
 means frames are missing their deadline. In order of likelihood: close other
 applications, especially browsers and anything compositing or recording;

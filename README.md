@@ -180,13 +180,14 @@ Nothing reads this file back. You transcribe the values into your experiment by 
 ## Running tests
 
 ```bash
-python -m unittest discover tests
+python -m unittest discover tests                    # logic tests, ~2 s
+MONICAL_RENDER=1 python -m unittest discover tests   # plus render tests, ~40 s
 ```
 
 Standard-library `unittest`, nothing to install beyond PsychoPy.
 
-- `tests/test_logic.py` (55 tests, under a second) needs no window and runs headless anywhere PsychoPy imports: flicker frame arithmetic, the multi-stimulus ring, per-copy states, key dispatch and hold-to-repeat, preset sanitizing and migration, the `--text` cycle, and the output files.
-- `tests/test_render.py` (16 tests, about 40 s) draws into a hidden PsychoPy window and compares pixels: the radial checkerboard against the original construction, rect/circle colour equivalence, text layout, off-screen flags against real clipping, the selection marker, the readout and intro layout, and a frame of every stimulus type at its defaults and range extremes. It needs a display with OpenGL. Without one, the module is skipped with the reason; set `MONICAL_SKIP_RENDER=1` to skip it on purpose.
+- `tests/test_logic.py` (55 tests) is the default run. It needs no window and runs headless anywhere PsychoPy imports: flicker frame arithmetic, the multi-stimulus ring, per-copy states, key dispatch and hold-to-repeat, preset sanitizing and migration, the `--text` cycle, and the output files.
+- `tests/test_render.py` (16 tests) runs only with `MONICAL_RENDER=1` and needs a display with OpenGL. It draws into a hidden PsychoPy window and compares pixels: the radial checkerboard against the original construction, rect/circle colour equivalence, text layout, off-screen flags against real clipping, the selection marker, the readout and intro layout, and a frame of every stimulus type at its defaults and range extremes. It is only needed when drawing or stimulus construction code changes.
 
 The tests check the software. Whether your display shows what was drawn is what [docs/VERIFICATION.md](docs/VERIFICATION.md) is for.
 

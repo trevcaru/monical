@@ -1,5 +1,6 @@
 # Per-session rig data. Reference only, regenerated every run.
 monical_*.json
+monical_crash_*.log
 bench_*.json
 calibration_values.json
 

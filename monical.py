@@ -23,9 +23,11 @@ import os
 import sys
 import json
 import math
+import atexit
 import argparse
 import datetime
 import collections
+import faulthandler
 import types
 
 import numpy as np
@@ -88,6 +90,7 @@ OUT_NAME_FMT = 'monical_{}.json'
 PRESET_NAME_FMT = 'preset_{}.json'
 SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
 BENCH_NAME_FMT = 'bench_{}.json'   # same stamp as the session files
+CRASH_NAME_FMT = 'monical_crash_{}.log'
 
 # --bench (MANUAL "Verifying frame timing on your rig"): every type at each
 # copy count with the readout off, then every type at the HUD counts with it
@@ -2270,6 +2273,36 @@ def session_out_path(slug):
     return unique_path(os.path.join(OUT_DIR, OUT_NAME_FMT.format(slug)))
 
 
+def start_crash_log(slug):
+    """Point faulthandler at monical_crash_<slug>.log beside the script.
+
+    A native crash (an access violation in the GL driver, say) kills the
+    process without a Python traceback; faulthandler writes every thread's
+    stack here first. On any clean exit -- core.quit() is sys.exit() -- the
+    file is closed and, if nothing was written, deleted.
+    """
+    path = os.path.join(OUT_DIR, CRASH_NAME_FMT.format(slug))
+    try:
+        handle = open(path, 'w')
+        faulthandler.enable(file=handle, all_threads=True)
+    except Exception as err:                                 # noqa: BLE001
+        print("Crash log unavailable ({}).".format(err))
+        return None
+    atexit.register(stop_crash_log, handle)
+    return handle
+
+
+def stop_crash_log(handle):
+    """Clean exit: close the crash log, and delete it if it is empty."""
+    faulthandler.disable()
+    handle.close()
+    try:
+        if os.path.getsize(handle.name) == 0:
+            os.remove(handle.name)
+    except OSError:
+        pass
+
+
 def ensure_dir(path):
     if not os.path.isdir(path):
         os.makedirs(path)
@@ -3077,6 +3110,7 @@ def run_bench(args):
     """
     image, image_label, image_failure = resolve_image(args.image)
     started = datetime.datetime.now()
+    start_crash_log(timestamp_slug(started))
     out_path = unique_path(os.path.join(
         OUT_DIR, BENCH_NAME_FMT.format(timestamp_slug(started))))
     mon = monitors.Monitor(MONITOR_NAME)
@@ -3200,6 +3234,7 @@ def main(argv=None):
     session_started = datetime.datetime.now()
     session_slug = timestamp_slug(session_started)
     out_path = session_out_path(session_slug)
+    start_crash_log(session_slug)
 
     text_presets, text_start = text_cycle(args.text)
     preset = load_preset(args.preset) if args.preset else {}

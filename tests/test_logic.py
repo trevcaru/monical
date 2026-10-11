@@ -339,13 +339,16 @@ class InputTests(unittest.TestCase):
 
     def test_repeat_60_per_second_after_1s_delay(self):
         for rate in REFRESH_RATES:
+            # No repeat before the 1.0 s hold delay has passed.
             state = m.default_state(m.STIM_GABOR)
             state['x_pos'] = 0.0
-            self.assertEqual(self.hold(state, 'right', 0.99, rate), 0)
+            self.assertEqual(self.hold(state, 'right', 0.99, rate), 0, rate)
+            self.assertEqual(state['x_pos'], 0.0)
+            # After the delay, 60 steps per second: a 2.0 s hold is 1.0 s of
+            # delay plus 1.0 s of repeating, so 60 repeat steps.
             state['x_pos'] = 0.0
-            steps = self.hold(state, 'right', 3.0, rate)
-            self.assertEqual(steps, 120, rate)      # 2 s x 60/s
-            self.assertEqual(state['x_pos'], round(120 * m.STEP_POS, 4))
+            self.assertEqual(self.hold(state, 'right', 2.0, rate), 60, rate)
+            self.assertEqual(state['x_pos'], round(60 * m.STEP_POS, 4))
 
     def test_repeat_rate_survives_uneven_frames(self):
         # Alternating 10 ms and 24 ms frames: the count keys off the hold

@@ -1,15 +1,14 @@
 """Rendering tests: draw into a hidden PsychoPy window and compare pixels.
 
-Needs an OpenGL context. Without one -- or with MONICAL_SKIP_RENDER=1 set --
-the whole module is skipped with the reason.
+Opt-in: they run only with MONICAL_RENDER=1, and need an OpenGL context
+(skipped with the reason without one). Run them when drawing or stimulus
+construction code changes.
 
-Python's cyclic garbage collector is off for the whole module. With it on,
-collecting discarded PsychoPy/pyglet stimuli -- at any point, even between
-tests -- intermittently left the next draw to crash with an access violation
-in the GL driver (seen on Windows, PsychoPy 2026.2.2, pyglet 1.4). With it
-off the module ran clean every time.
+    MONICAL_RENDER=1 python -m unittest tests.test_render
 
-    python -m unittest tests.test_render
+The garbage collector is off for the module: with it on, this harness hit
+intermittent access violations in the GL driver. Never seen in the app, and
+the app's crash log (monical_crash_*.log) would catch it if it ever occurs.
 """
 import gc
 import os
@@ -30,8 +29,8 @@ WINDOWS = []
 
 def setUpModule():
     global WIN
-    if os.environ.get('MONICAL_SKIP_RENDER'):
-        raise unittest.SkipTest('MONICAL_SKIP_RENDER is set')
+    if not os.environ.get('MONICAL_RENDER'):
+        raise unittest.SkipTest('set MONICAL_RENDER=1 to run render tests')
     try:
         WIN = make_window((W, H))
     except Exception as err:                                 # noqa: BLE001
