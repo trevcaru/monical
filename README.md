@@ -49,7 +49,7 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `C`/`V` | contrast ±0.001 |
 | `F`/`J` | custom flicker (mode 5) ±1 frame, so every press is a new realized rate |
 | `;`/`'` | viewing distance ±1 cm |
-| `[`/`]` · `,`/`.` | multi-stimulus ring: copies 2–16 · rotate ±5° |
+| `[`/`]` · `,`/`.` · `9`/`0` | multi-stimulus ring: copies 2–16 · rotate ±5° · select a copy (its own mode 5 frames via `F`/`J`) |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
 | `Z/X` / `R/T` | radial only: rings ±1 (1–20) / wedges ±2 (2–32) |
 | `D/A` / `B` | grating only: waveform sin/sqr/saw / circular mask on-off |

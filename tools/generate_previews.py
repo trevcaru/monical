@@ -297,7 +297,8 @@ KNOBS: [Z/X] SF   [R/T] orientation   [E/W] phase   [D/A] SD
 
 MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz
        [5] custom Hz  [G] gamma steps  [8] spatial uniformity
-       [7] toggles DUAL (two copies at +/-X, same flicker)
+       [7] MULTI ring on/off  [ / ] copies 2-16  [,/.] rotate
+       [9/0] select copy -- [F/J] then sets ITS mode 5 frames
 [S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma
 [Q] quit (saves final state)
 
@@ -350,7 +351,7 @@ def main():
     # 6 lines, longest 130 chars (the status bar): 6.8pt keeps it inside
     # 800px.
     save(text_screen(HUD_TEXT, 6.8), 'hud_example.png', TEXT_BG)
-    # 33 lines: 8.0pt at 1.18 spacing fits 800x500. Overflowing text makes
+    # 34 lines: 8.0pt at 1.18 spacing fits 800x500. Overflowing text makes
     # bbox_inches='tight' GROW the saved image instead of clipping it.
     save(text_screen(INTRO_TEXT, 8.0, linespacing=1.18),
          'intro_screen.png', TEXT_BG)

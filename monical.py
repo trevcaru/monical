@@ -212,6 +212,15 @@ FIXATION_HIDDEN_MODES = (MODE_GAMMA, MODE_UNIFORMITY)
 DUAL_KEY = '7'
 MULTI_MIN, MULTI_MAX = 2, 16
 STEP_RING = 5.0
+SELECT_PREV, SELECT_NEXT = '9', '0'
+
+# Selection marker (PRD 6.3): a short thin tick pointing at the selected copy,
+# drawn with the readout. It sits outside every copy's footprint circle -- a
+# tick that strayed onto a stimulus would corrupt a photometer reading.
+MARKER_LEN = 0.03
+MARKER_GAP = 0.012                # from the selected copy's footprint
+MARKER_CLEAR = 0.006              # from every other copy's footprint
+MARKER_COLOR = [1.0, 1.0, -1.0]   # yellow, rgb
 
 # PRD 6.2 -- 11 levels in PsychoPy rgb units, index 5 is mid-gray.
 GAMMA_LEVELS = [-1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
@@ -524,6 +533,8 @@ def key_claim(state, key, sweeping=False):
         return 'mode'
     if key == DUAL_KEY:
         return 'dual'
+    if key in (SELECT_PREV, SELECT_NEXT):
+        return 'select'           # inert while multi is off
     # [A] is a knob on several types, so gamma mode claims it for the sweep.
     if key == 'a' and state['mode'] == MODE_GAMMA:
         return 'sweep_toggle'
@@ -596,8 +607,103 @@ def mode_frames(state, refresh_hz):
     if mode in FLICKER_HZ:
         return hz_to_frames(FLICKER_HZ[mode], refresh_hz)
     if mode == MODE_FLICKER_CUSTOM:
-        return state['flicker_frames']
+        return state['stim_frames'][selected(state)]
     return None
+
+
+def selected(state):
+    """Index of the selected copy: always 0 while multi is off."""
+    if not state['multi']:
+        return 0
+    return min(state['selected_index'], state['multi_count'] - 1)
+
+
+def sync_stim_frames(state):
+    """Give every copy a frame count, and keep the selection on a copy.
+
+    A copy beyond anything remembered takes the frames of the current last
+    copy; one that existed earlier in the session gets its own value back.
+    """
+    frames = state['stim_frames']
+    while len(frames) < state['multi_count']:
+        frames.append(frames[-1])
+    state['selected_index'] = min(state['selected_index'],
+                                  state['multi_count'] - 1)
+
+
+def copy_frames(state, refresh_hz):
+    """Frames per cycle for each drawn copy, or None if not flickering.
+
+    Modes 3 and 4 drive every copy at the shared target; mode 5 gives each
+    copy its own count.
+    """
+    count = len(ring_positions(state))
+    mode = state['mode']
+    if mode in FLICKER_HZ:
+        return [hz_to_frames(FLICKER_HZ[mode], refresh_hz)] * count
+    if mode == MODE_FLICKER_CUSTOM:
+        if not state['multi']:
+            return [state['stim_frames'][0]]
+        return list(state['stim_frames'][:count])
+    return None
+
+
+def drawn_positions(state, refresh_hz):
+    """Positions drawn THIS frame (PRD 6.1, 6.3).
+
+    Copy i is on iff (frame_idx % frames_i) < frames_i // 2 -- stim_is_on,
+    stateless in the one shared frame_idx, which resets on a mode switch.
+    """
+    if state['mode'] == MODE_STATIC_OFF:
+        return []
+    positions = ring_positions(state)
+    frames = copy_frames(state, refresh_hz)
+    if frames is None:
+        return positions
+    return [pos for pos, n in zip(positions, frames)
+            if stim_is_on(state['frame_idx'], n)]
+
+
+def footprint_radius(state, extent=None):
+    """Radius of a circle that holds one copy, whatever its type and angle.
+
+    `extent` is (width, height) for text, whose string can be far wider than
+    the size knob; every other type fits in a size x size square.
+    """
+    width, height = extent if extent else (state['size'], state['size'])
+    return 0.5 * math.hypot(width, height)
+
+
+def marker_segment(state, radius):
+    """(start, end) of the selection tick, or None if none can fit.
+
+    Tried radially outward from the ring centre first, then swinging round in
+    30 degree steps. A direction is used only if the tick stays MARKER_CLEAR
+    outside every copy's footprint circle.
+    """
+    positions = ring_positions(state)
+    cx, cy = positions[selected(state)]
+    out = math.atan2(cy - state['y_pos'], cx) if (cx or
+                                                   cy - state['y_pos']) else 0
+    for step in (0, 6, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5):
+        angle = out + math.radians(30 * step)
+        dx, dy = math.cos(angle), math.sin(angle)
+        start = (cx + dx * (radius + MARKER_GAP), cy + dy * (radius + MARKER_GAP))
+        end = (cx + dx * (radius + MARKER_GAP + MARKER_LEN),
+               cy + dy * (radius + MARKER_GAP + MARKER_LEN))
+        if all(segment_distance(start, end, pos) > radius + MARKER_CLEAR
+               for pos in positions):
+            return start, end
+    return None
+
+
+def segment_distance(a, b, p):
+    """Shortest distance from point p to the segment a-b."""
+    ax, ay = a
+    vx, vy = b[0] - ax, b[1] - ay
+    t = ((p[0] - ax) * vx + (p[1] - ay) * vy) / float(vx * vx + vy * vy)
+    t = clamp(t, 0.0, 1.0)
+    return math.hypot(p[0] - (ax + t * vx), p[1] - (ay + t * vy))
 
 
 def knob_table(stimulus_type, refresh_hz=60.0):
@@ -630,6 +736,11 @@ def apply_knob(state, key, table):
     if spec is None:
         return False
     field, delta, low, high, kind = spec
+    if field == 'flicker_frames':
+        # Mode 5 frames belong to the SELECTED copy (PRD 6.3).
+        frames, index = state['stim_frames'], selected(state)
+        frames[index] = int(clamp(frames[index] + delta, low, high))
+        return True
     if kind == 'choice':
         options = CHOICES[field]
         state[field] = options[
@@ -643,6 +754,8 @@ def apply_knob(state, key, table):
         state[field] = int(round(clamp(value, low, high)))
     else:
         state[field] = round(clamp(value, low, high), STORE_DP)
+    if field == 'multi_count':
+        sync_stim_frames(state)
     return True
 
 
@@ -721,9 +834,13 @@ def default_state(stimulus_type, refresh_hz=60.0):
         'bg_gray': 0.0,
         'size': 0.225,
         'contrast': 1.0,
-        # Mode 5 cycle length in whole frames (PRD 6.1). Saved in presets
-        # with refresh_hz, so a preset can tell when the panel changed.
-        'flicker_frames': hz_to_frames(DEFAULT_CUSTOM_HZ, refresh_hz),
+        # Mode 5 cycle length in whole frames, one per ring copy (PRD 6.1,
+        # 6.3). Entries past multi_count are kept, so lowering then raising
+        # the count brings dropped values back. Saved in presets with
+        # refresh_hz, so a preset can tell when the panel changed.
+        'stim_frames': [hz_to_frames(DEFAULT_CUSTOM_HZ, refresh_hz)] *
+                       MULTI_MIN,
+        'selected_index': 0,
         'refresh_hz': refresh_hz,
         'viewing_distance_cm': 40,
 
@@ -970,6 +1087,7 @@ class GlyphString(object):
         self.glyphs = []
         self.offsets = []
         self.advances = []
+        self.height = 0.0
         self._build_key = None
         self._layout_key = None
         self._style = None
@@ -986,8 +1104,8 @@ class GlyphString(object):
                 anchorHoriz='center' if single else 'left',
                 alignText='center' if single else 'left',
                 autoLog=False) for char in (text if text else ' ')]
-            self.advances = ([0] if single else
-                             glyph_advances(text, font, size * win_h))
+            self.advances = glyph_advances(text or ' ', font, size * win_h)
+            self.height = size
             self._build_key = build_key
             self._layout_key = self._style = None
         layout_key = (state['letter_spacing'], state['rotation_deg'])
@@ -1011,6 +1129,14 @@ class GlyphString(object):
                 glyph.opacity = style[3]
                 glyph.contrast = style[4]
             self._style = style
+
+    def extent(self):
+        """(width, height) of the string's advance box, height units."""
+        win_h = float(self.win.size[1])
+        spacing = self._layout_key[0] if self._layout_key else 0.0
+        width = (sum(self.advances) / win_h +
+                 max(0, len(self.advances) - 1) * spacing)
+        return width, self.height
 
     def draw(self):
         x, y = self.pos
@@ -1262,6 +1388,7 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label,
         "MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz",
         "       [5] custom Hz  [G] gamma steps  [8] spatial uniformity",
         "       [7] MULTI ring on/off  [ / ] copies 2-16  [,/.] rotate",
+        "       [9/0] select copy -- [F/J] then sets ITS mode 5 frames",
         "[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma",
         "[Q] quit (saves final state)",
         "",
@@ -1482,7 +1609,8 @@ def build_status_bar(state, out_name=''):
                 'ON' if state['hud_visible'] else 'OFF',
                 MENU_TOGGLE_KEY.upper(),
                 'ON' if state['menu_visible'] else 'OFF',
-                flicker_text(state['flicker_frames'], state['refresh_hz']),
+                flicker_text(state['stim_frames'][selected(state)],
+                             state['refresh_hz']),
                 mode_label(state, state['refresh_hz']), name)
 
 
@@ -1508,10 +1636,12 @@ def build_menu_text(state):
         '',
         'MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position',
         'DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast',
-        "FREQUENCY: F/J = Custom flicker +/-1 frame | ;/' = Viewing distance",
+        "FREQUENCY: F/J = Custom flicker +/-1 frame (selected copy) | "
+        ";/' = Viewing distance",
         'MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom',
         '           G=Gamma  7=Multi on/off  8=Uniformity',
-        'RING:      [/] = Copies 2-16 | ,/. = Rotate +/-5 deg',
+        'RING:      [/] = Copies 2-16 | ,/. = Rotate +/-5 deg | '
+        '9/0 = Select copy',
         'ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot',
         '           H=Toggle HUD  M=This menu  Q=Quit',
         '',
@@ -1561,7 +1691,7 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
     frames = mode_frames(state, refresh_hz)
     if frames is None:
         freq_text = 'Freq: {} idle'.format(
-            flicker_text(state['flicker_frames'], refresh_hz))
+            flicker_text(state['stim_frames'][selected(state)], refresh_hz))
     else:
         freq_text = 'Freq: {}'.format(flicker_text(frames, refresh_hz))
 
@@ -1585,7 +1715,32 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
             px_size, _deg(size_deg), _deg(ecc_deg)),
         'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
             state['bg_gray'], state['contrast'], freq_text),
-    ] + wrap_hud_line(stim_line(state, sweep), hud_line_chars(state)))
+    ] + wrap_hud_line(stim_line(state, sweep), hud_line_chars(state))
+      + ring_lines(state, refresh_hz))
+
+
+def ring_lines(state, refresh_hz):
+    """Every copy's realised rate, selected one starred, as many lines as
+    the screen width needs. Empty with multi off (line 4 says it all)."""
+    if not state['multi'] or state['mode'] in (MODE_GAMMA, MODE_UNIFORMITY):
+        return []
+    frames = copy_frames(state, refresh_hz)
+    if frames is None:
+        frames = state['stim_frames'][:state['multi_count']]
+    entries = []
+    for i, n in enumerate(frames):
+        on, off = flicker_split(n)
+        entries.append('{}{}:{:.2f}{}'.format(
+            i + 1, '*' if i == selected(state) else '',
+            frames_to_hz(n, refresh_hz), ' ASYM' if on != off else ''))
+    lines, line = [], 'Ring Hz:'
+    budget = hud_line_chars(state)
+    for entry in entries:
+        if len(line) + 2 + len(entry) > budget:
+            lines.append(line)
+            line = '        '
+        line += '  ' + entry
+    return lines + [line]
 
 
 # =============================================================================
@@ -1678,15 +1833,28 @@ def stimulus_specific(state):
     return record
 
 
-def stimuli_record(state, screen_height_cm):
-    """Every drawn copy: position and its own eccentricity from fixation."""
+def stimuli_record(state, screen_height_cm, refresh_hz):
+    """Every drawn copy: position, eccentricity from fixation, flicker.
+
+    The cycle is the active flicker mode's, or each copy's mode 5 setting
+    when nothing is flickering (flicker_active says which).
+    """
+    positions = ring_positions(state)
+    frames = copy_frames(state, refresh_hz)
+    if frames is None:
+        frames = ([state['stim_frames'][0]] if not state['multi'] else
+                  state['stim_frames'][:len(positions)])
     record = []
-    for index, (x, y) in enumerate(ring_positions(state)):
+    for index, ((x, y), n) in enumerate(zip(positions, frames)):
         ecc = eccentricity_deg(math.hypot(x, y), screen_height_cm,
                                state['viewing_distance_cm'])
+        on, off = flicker_split(n)
         record.append({'index': index, 'x': round(x, STORE_DP),
                        'y': round(y, STORE_DP),
-                       'ecc_deg': None if ecc is None else round(ecc, 2)})
+                       'ecc_deg': None if ecc is None else round(ecc, 2),
+                       'flicker_frames': n, 'on_frames': on,
+                       'off_frames': off,
+                       'realized_hz': round(frames_to_hz(n, refresh_hz), 3)})
     return record
 
 
@@ -1700,7 +1868,7 @@ def state_record(state, screen_height_cm, refresh_hz=None,
     frames = mode_frames(state, refresh)
     active = frames is not None
     if not active:
-        frames = state['flicker_frames']
+        frames = state['stim_frames'][selected(state)]
     on, off = flicker_split(frames)
     record = {
         'snapshot_number': snapshot_number,
@@ -1717,23 +1885,24 @@ def state_record(state, screen_height_cm, refresh_hz=None,
         'ring_offset_deg': round(state['ring_offset_deg'], STORE_DP),
         'ring_radius': round(abs(state['x_pos']), STORE_DP),
         'ring_center_y': round(state['y_pos'], STORE_DP),
-        'stimuli': stimuli_record(state, screen_height_cm),
+        'selected_index': selected(state),
+        'stimuli': stimuli_record(state, screen_height_cm, refresh),
         'x_position': round(state['x_pos'], STORE_DP),
         'y_position': round(state['y_pos'], STORE_DP),
         'background_gray': round(state['bg_gray'], STORE_DP),
         'disc_size': round(state['size'], STORE_DP),
         'contrast': round(state['contrast'], STORE_DP),
-        # Back-compat: the REALISED rate of mode 5's frame count, no longer
-        # a requested integer (PRD 3.2).
+        # Back-compat: the REALISED rate of the selected copy's mode 5 frame
+        # count, no longer a requested integer (PRD 3.2).
         'custom_frequency_hz': round(
-            frames_to_hz(state['flicker_frames'], refresh), 3),
+            frames_to_hz(state['stim_frames'][selected(state)], refresh), 3),
         'visual_angle_deg': None if angle is None else round(angle, 2),
         'eccentricity_deg': None if ecc is None else round(ecc, 2),
         'stimulus_specific': stimulus_specific(state),
     }
-    # The active flicker mode's cycle, or mode 5's standing setting when no
-    # flicker mode is on (flicker_active says which). The rate is what the
-    # frame count delivers at refresh_hz_used, never a requested value.
+    # The SELECTED copy's cycle in the active flicker mode, or its mode 5
+    # setting when no flicker mode is on (flicker_active says which). The
+    # rate is what the frame count delivers at refresh_hz_used.
     record.update({
         'flicker_active': active,
         'flicker_frames': frames,
@@ -1920,9 +2089,15 @@ def sweep_step(state, sweep, clock):
 # =============================================================================
 
 def preset_from_state(state):
-    """Everything a preset carries: the stimulus, not the rig or the run."""
-    return {key: value for key, value in state.items()
-            if key not in PRESET_EXCLUDE}
+    """Everything a preset carries: the stimulus, not the rig or the run.
+
+    Only the active copies' frames: values remembered past the count are
+    session memory, not part of the configuration.
+    """
+    preset = {key: value for key, value in state.items()
+              if key not in PRESET_EXCLUDE}
+    preset['stim_frames'] = list(state['stim_frames'][:state['multi_count']])
+    return preset
 
 
 def save_preset(state, slug=None):
@@ -2006,12 +2181,38 @@ def is_number(value):
             and math.isfinite(value))
 
 
-def preset_flicker_frames(loaded, refresh_hz):
-    """Mode 5 frame count a preset asks for at THIS refresh, or None.
+def preset_stim_frames(loaded, refresh_hz, count):
+    """Per-copy mode 5 frames a preset asks for at THIS refresh, or None.
 
-    New presets carry flicker_frames and the refresh they were saved at. On a
-    panel more than 1% faster or slower the rate, not the count, is what was
-    dialled in, so it is re-derived. Old presets carry only custom_freq_hz.
+    Current presets carry stim_frames, a list; earlier ones a single
+    flicker_frames, or only custom_freq_hz. Each value goes through the same
+    refresh conversion. A list whose length does not match the count is
+    padded with its last value or truncated, with a console note.
+    """
+    if isinstance(loaded.get('stim_frames'), list) and loaded['stim_frames']:
+        values = [preset_flicker_frames(dict(loaded, flicker_frames=v),
+                                        refresh_hz)
+                  for v in loaded['stim_frames']]
+    else:
+        single = preset_flicker_frames(loaded, refresh_hz)
+        if single is None:
+            return None
+        values = [single]
+    if 'stim_frames' in loaded and len(values) != count:
+        print("Preset: {} per-copy frame value(s) for {} copies -- {}".format(
+            len(values), count, 'padded with the last' if len(values) < count
+            else 'extra dropped'))
+    while len(values) < count:
+        values.append(values[-1])
+    return values[:count]
+
+
+def preset_flicker_frames(loaded, refresh_hz):
+    """One mode 5 frame count a preset asks for at THIS refresh, or None.
+
+    Frame counts come with the refresh they were saved at. On a panel more
+    than 1% faster or slower the rate, not the count, is what was dialled
+    in, so it is re-derived. Old presets carry only custom_freq_hz.
     """
     frames = loaded.get('flicker_frames')
     saved_refresh = loaded.get('refresh_hz')
@@ -2037,6 +2238,15 @@ def preset_flicker_frames(loaded, refresh_hz):
     return frames                 # absent, or junk for sanitize_param
 
 
+def sanitize_report(field, value, default, ranges):
+    """sanitize_param, printing one console line if it changed anything."""
+    fixed, reason = sanitize_param(field, value, default, ranges)
+    if reason:
+        print("Preset: {} {!r} -> {!r} ({})".format(field, value, fixed,
+                                                     reason))
+    return fixed
+
+
 def apply_preset(state, loaded, text_presets=None):
     """Overlay a preset onto a default state. Returns the keys applied.
 
@@ -2054,12 +2264,11 @@ def apply_preset(state, loaded, text_presets=None):
         if loaded.pop('dual') is True and 'multi' not in loaded:
             loaded.update(multi=True, multi_count=2, ring_offset_deg=0.0)
             print("Preset: dual -> multi-stimulus ring, 2 copies, offset 0")
-    frames = preset_flicker_frames(loaded, state['refresh_hz'])
+    frames_source = dict(loaded)
     # refresh_hz describes the rig a preset was saved on, never this one.
-    for key in ('flicker_frames', 'refresh_hz', 'custom_freq_hz'):
+    for key in ('stim_frames', 'flicker_frames', 'refresh_hz',
+                'custom_freq_hz', 'selected_index'):
         loaded.pop(key, None)
-    if frames is not None:
-        loaded['flicker_frames'] = frames
     ranges = param_ranges(state['refresh_hz'])
     applied, ignored = [], []
     for key, value in loaded.items():
@@ -2067,13 +2276,22 @@ def apply_preset(state, loaded, text_presets=None):
             ignored.append(key)
             continue
         if key in ranges:
-            fixed, reason = sanitize_param(key, value, state[key], ranges)
-            if reason:
-                print("Preset: {} {!r} -> {!r} ({})".format(
-                    key, value, fixed, reason))
-            value = fixed
+            value = sanitize_report(key, value, state[key], ranges)
         state[key] = value
         applied.append(key)
+    # Per-copy frames need the count, which the loop above may have set.
+    frames = preset_stim_frames(frames_source, state['refresh_hz'],
+                                state['multi_count'])
+    if frames is not None:
+        state['stim_frames'] = [
+            sanitize_report('flicker_frames', value,
+                            state['stim_frames'][0], ranges)
+            for value in frames]
+    sync_stim_frames(state)
+    index = frames_source.get('selected_index', 0)
+    state['selected_index'] = (int(clamp(int(index), 0,
+                                         state['multi_count'] - 1))
+                               if is_number(index) else 0)
     if state['mode'] not in MODE_KEYS.values():
         print("Preset: mode {!r} -> {!r} (unknown mode)".format(
             state['mode'], MODE_STATIC_ON))
@@ -2273,6 +2491,11 @@ def main(argv=None):
     uniformity_patches = {shape: make_patch(win, state, shape)
                           for shape in CHOICES['shape']}
 
+    marker = visual.ShapeStim(
+        win=win, vertices=[(0, 0), (0, MARKER_LEN)], closeShape=False,
+        lineWidth=2, lineColor=MARKER_COLOR, colorSpace='rgb',
+        fillColor=None, interpolate=False, autoLog=False)
+
     hud = visual.TextStim(
         win, text='', font=READOUT_FONT, height=HUD_HEIGHT, color='white',
         pos=(0, HUD_POS_Y), wrapWidth=HUD_WRAP_W, alignText='center',
@@ -2381,6 +2604,12 @@ def main(argv=None):
                 continue
             if claim == 'dual':
                 state['multi'] = not state['multi']
+                continue
+            if claim == 'select':
+                if state['multi']:
+                    step = 1 if key == SELECT_NEXT else -1
+                    state['selected_index'] = (
+                        (selected(state) + step) % state['multi_count'])
                 continue
 
             # --- Auto gamma sweep (PRD 6.5). [A] is a knob on several stimulus
@@ -2560,14 +2789,12 @@ def main(argv=None):
         elif mode == MODE_STATIC_OFF:
             pass                      # background + fixation only (PRD 6)
         elif stim is not None:
-            # static_on, or the ON half of a flicker cycle. stim_is_on is
-            # stateless in frame_idx, which resets on every mode switch.
-            if frames is None or stim_is_on(state['frame_idx'], frames):
-                # PRD 6.3: one copy, or N on the ring, same flicker phase.
-                for pos in ring_positions(state):
-                    stim.pos = pos
-                    stim.draw()
-                stim.pos = (state['x_pos'], state['y_pos'])
+            # static_on, or each copy's ON half of its own flicker cycle
+            # (PRD 6.1, 6.3).
+            for pos in drawn_positions(state, measured_refresh):
+                stim.pos = pos
+                stim.draw()
+            stim.pos = (state['x_pos'], state['y_pos'])
 
         # Fixation cross in every mode EXCEPT the two measured ones. In gamma
         # steps (PRD 6.2) the photometer sits at screen centre; in spatial
@@ -2576,6 +2803,16 @@ def main(argv=None):
         # reading, and the gamma curve is what everything else depends on.
         if mode not in FIXATION_HIDDEN_MODES:
             fixation.draw()
+
+        # The selection tick goes with the readout: [H] hides both, so a
+        # photometer or screenshot frame never carries it (PRD 6.3).
+        if (state['hud_visible'] and state['multi'] and
+                mode not in (MODE_GAMMA, MODE_UNIFORMITY)):
+            extent = stim.extent() if stimulus_type == STIM_TEXT else None
+            segment = marker_segment(state, footprint_radius(state, extent))
+            if segment is not None:
+                marker.vertices = list(segment)
+                marker.draw()
 
         if state['hud_visible']:
             hud.text = build_hud(state, resolution, measured_refresh,

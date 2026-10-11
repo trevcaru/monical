@@ -108,10 +108,11 @@ until you fix the width in PsychoPy Monitor Center (§8).
 | Background gray | `PAGEUP` / `PAGEDN` | ±0.001 | −1.0 to 1.0 | hold |
 | Size | `+` / `-` | ±0.01 | 0.01 to 2.0 | single press |
 | Contrast | `C` / `V` | ±0.001 | 0.0 to 1.0 | hold |
-| Custom flicker (mode 5) | `F` / `J` | ±1 frame | 2 frames to round(refresh) frames | hold |
+| Custom flicker (mode 5) | `F` / `J` | ±1 frame (selected copy in multi) | 2 frames to round(refresh) frames | hold |
 | Viewing distance | `;` / `'` | ±1 cm | 1 to 500 | single press |
 | Ring copies (multi) | `[` / `]` | ±1 | 2 to 16 | single press |
 | Ring offset (multi) | `,` / `.` | ±5° | wraps 0–360 | single press |
+| Select copy (multi) | `9` / `0` | previous / next | wraps | single press |
 
 Custom flicker is a cycle length in **whole frames**. `F` raises the rate (one
 frame fewer) and `J` lowers it, so every press changes the realized Hz. It
@@ -160,6 +161,15 @@ turn the ring in 5° steps. With 2 copies and no rotation you get the classic
 ±X pair. Readout line 2 shows `MULTI N r ... off ...` and adds `OVERLAP` when
 neighbouring copies are closer than the stimulus size. Nothing is moved for
 you. Gamma steps and spatial uniformity always draw one patch.
+
+`9` and `0` select the previous and next copy; a small yellow tick points at
+the selected one while the readout is visible (`H` hides it with the text).
+In mode `5`, `F` / `J` change only the selected copy's frame count, so each
+copy can flicker at its own rate. Modes `3` and `4` still flicker every copy
+at 15 or 20 Hz. A new copy starts with the last copy's frames, and copies you
+remove keep their values for the rest of the session if you add them back.
+The readout lists every copy's rate, for example
+`Ring Hz:  1:15.00  2:20.00 ASYM  3*:12.00`, with the selected one starred.
 
 ### Actions
 
