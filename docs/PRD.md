@@ -107,6 +107,7 @@ Contains:
   "platform": "win32",
   "has_radial_stim": true,
   "image_path": null,
+  "image_load_failed": false,
   "text_arg": null,
   "preset_path": null,
   "output_file": "monical_2026-08-21_143012.json",
@@ -169,6 +170,8 @@ Every snapshot and the final record carry the flicker cycle: `flicker_frames`, `
 **Refresh rate vs frame rate.** `startup_refresh_hz` is the one-shot `getMsPerFrame` measurement taken before the intro screen. `final_rolling_refresh_hz` is the mean of actual flip-to-flip intervals over the last 120 frames, which is a *loop* rate — it equals the display's refresh rate only while vsync holds `flip()` to the retrace, which is why `vsync` is recorded beside it. If the two figures diverge by more than 5 Hz the tool warns on the console, since that usually means the startup measurement fell back to a default and every frame-count frequency in the session is built on a wrong number.
 
 A frame counts toward `total_dropped_frames` when its flip-to-flip interval exceeds 1.5× the rolling median interval.
+
+**No absolute paths in output.** Every path written to a JSON file drops its directories, so a shared file carries no user or machine names: `image_path`, the custom PNG `filepath` and the bench `texture` are the `--image` file's basename, `preset_path` is relative to the folder holding `monical.py` when the preset is inside it (`presets/preset_...json`) and its basename otherwise, and `output_file` is the file's own name. `image_load_failed` is true when `--image` was given but missing or undecodable, so the session ran on the generated pattern (§4.5).
 
 ---
 
@@ -318,7 +321,7 @@ python monical.py --image assets/texture.png
 
 If `--image` is provided, option `[5]` appears on the intro screen selector. If not provided, option `[5]` still appears but uses a generated 256×256 NumPy checkerboard test pattern (alternating black/white squares, 8×8 grid). No file dialogs, no mouse interaction — consistent with §13.
 
-The path is stored in state and written to snapshots for reproducibility. If the file doesn't exist at runtime, print an error and fall back to the generated pattern.
+The file's basename is written to snapshots for reproducibility (§3.2: no absolute paths in output). If the file does not exist, or exists but PIL cannot decode it (a renamed text file, a truncated PNG), the console prints a warning, the intro screen shows `Image: FAILED to load <name>, using test pattern` (`NOT FOUND` for a missing file), the generated pattern is used, and the session header records `image_load_failed: true`. Nothing crashes.
 
 **Stimulus-specific parameters:**
 
@@ -331,7 +334,7 @@ Rotation is single-press and sets ImageStim `ori` (clockwise, PsychoPy's convent
 
 All universal parameters apply: position, size, contrast, background, flicker, viewing distance.
 
-**Stimulus-specific snapshot fields:** `{"filepath": "...", "alpha": 1.0, "rotation_deg": 0.0}`
+**Stimulus-specific snapshot fields:** `{"filepath": "texture.png", "alpha": 1.0, "rotation_deg": 0.0}`. `filepath` is the basename, or `<generated 8x8 checkerboard>`.
 
 ### 4.6 Text stimulus
 
@@ -661,11 +664,13 @@ KEYBINDINGS -- Text / letter string (reading/crowding)
 
 MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position
 DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast
-FREQUENCY: F/J = Custom flicker +/-1 frame (selected copy) | ;/' = Viewing distance
+FREQUENCY: F/J = Custom flicker faster/slower (one frame per step)
+DISTANCE:  ;/' = Viewing distance +/-1 cm
 MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom
            G=Gamma  7=Multi on/off  8=Uniformity
 RING:      [ ] = Copies 2-16 | ,/. = Rotate +/-5 deg | 9/0 = Select copy
            / = Selected copy: flicker -> steady -> off
+           F/J step the selected copy only
 ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot
            H=Toggle HUD  M=This menu  Q=Quit
 
@@ -686,7 +691,7 @@ Line 5 for `custom_png` shows:
 File: [filename] | Alpha: [a:.3f] | Rot: [deg] deg
 ```
 
-Filename only, not the full path — the path can be arbitrarily long and Line 5 is a single readout line. The full path is recorded in the snapshot.
+Filename only, not the full path — the path can be arbitrarily long and Line 5 is a single readout line. The snapshot records the same basename (§3.2).
 
 ---
 
@@ -703,9 +708,12 @@ PsychoPy:   [version]
 Plugin:     psychopy_visionscience [OK / FAILED -- pip install psychopy-visionscience]
 Output:     [session filename, §3.2]
 Preset:     [preset filename, only with --preset]
+Image:      [FAILED to load / NOT FOUND <name>, using test pattern -- only when --image failed, §4.5]
 ```
 
-A yellow monitor-dimension warning (§12) appears at the bottom when it applies.
+A yellow monitor-dimension warning (§12) appears at the bottom when it applies, anchored to the bottom edge and wrapped to the screen width.
+
+**Fit.** The wrap box is capped at 96% of the screen width, so on a 4:3 panel the left-aligned block starts on screen instead of past its left edge. The block is centred in the space above the warning. It keeps its 0.020 text height unless the longest combination (the custom PNG workflow with the preset and image lines, or the radial workflow with the plugin-failure lines) would not fit there, and then shrinks just enough: about 0.017–0.019 in those cases. *Measured* at 1024×768, 1600×900 and 1720×720, with and without the warning, for every type: no line off screen and none overlapping the warning.
 
 **Section 2 — Stimulus selector:**
 ```
@@ -737,15 +745,13 @@ MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz
        [9/0] select copy -- [F/J] then sets ITS mode 5 frames
        [/] selected copy: flicker -> steady -> off
 [S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma
-[Q] quit (saves final state)
+[H] readout  [M] key card  [;/'] distance  [Q]/[ESC] save+quit
 ```
 
 **Section 5 — Proceed:**
 ```
-Press SPACE to begin.
+Press SPACE to begin. Q or ESC here exits without saving.
 ```
-
-`Q` or `ESC` on this screen aborts without writing a file.
 
 ---
 

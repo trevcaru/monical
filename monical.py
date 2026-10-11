@@ -10,15 +10,13 @@ code by hand.
 
 Monical does not run experiments, collect data, or apply corrections. It
 characterizes and verifies. Output is REFERENCE ONLY -- nothing auto-loads
-calibration_values.json.
+the monical_*.json session files.
 
-    python monical.py
+    python monical.py [--image PATH] [--text STRING] [--preset PATH] [--bench]
 
 Single file, PsychoPy only (psychopy_visionscience optional, radial
-checkerboard only). See docs/PRD.md for the design authority.
-
-STATUS: scaffold. Window, intro screen, main-loop skeleton, JSON output.
-Stimuli, parameter knobs, modes, and the HUD are not implemented yet.
+checkerboard only). See docs/PRD.md for the design authority and
+docs/MANUAL.md for operation.
 """
 
 import os
@@ -109,7 +107,7 @@ PRESET_EXCLUDE = ('frame_idx', 'snapshots', 'aspect', 'image_path',
 
 SETTLE_S = 2.0                    # auto gamma dwell per level (PRD 6.5)
 
-# Stimulus types, in intro-screen selector order [1-4].
+# Stimulus types, in intro-screen selector order [1-6].
 STIM_RADIAL = 'radial_checkerboard'
 STIM_GABOR = 'gabor'
 STIM_GRATING = 'grating'
@@ -146,12 +144,12 @@ TEXT_HUD_CHARS = 24               # HUD shows longer strings truncated
 
 # Physically implausible screen heights. Below or above these the Monitor
 # object almost certainly holds a default rather than this rig's real size,
-# and every visual angle derived from it is wrong (PRD 15).
+# and every visual angle derived from it is wrong (PRD 12).
 MONITOR_H_MIN_CM = 15.0
 MONITOR_H_MAX_CM = 80.0
 
 # [H] toggles the readout. Custom-frequency-down moved from [H] to [J] to
-# free it (PRD 5).
+# free it (PRD 8.1).
 HUD_TOGGLE_KEY = 'h'
 
 # [M] toggles the full keybinding reference card (PRD 8.3).
@@ -180,6 +178,13 @@ HUD_LINE_PITCH = 0.0204
 # in the readout still appears on the very next frame.
 HUD_TIMING_INTERVAL_S = 0.1
 
+# The intro screen. INTRO_HEIGHT is a ceiling: set_intro_text shrinks the
+# block only when it would not fit above the monitor warning.
+INTRO_HEIGHT = 0.020
+INTRO_WRAP_W = 1.7
+INTRO_WRAP_FRAC = 0.96            # of screen width, when that is narrower
+INTRO_MARGIN = 0.01
+
 MENU_HEIGHT = 0.021
 MENU_BOX_W_FRAC = 0.72            # of screen width
 MENU_BOX_H_FRAC = 0.62            # of screen height -- about 60% centred
@@ -192,9 +197,9 @@ FIXATION_SIZE = (0.07, 0.07)      # experiment FIXATION_SIZE, from the seed
 TEST_PATTERN_RES = 256
 TEST_PATTERN_CELLS = 8
 GENERATED_LABEL = '<generated 8x8 checkerboard>'
+IMAGE_NAME_CHARS = 30             # --image basename budget on the intro screen
 
-# Modes. Named here so the scaffold's state dict and JSON records already use
-# the final vocabulary; only static_on is reachable until modes land.
+# Mode identifiers, as written to the JSON `mode` field (PRD 6).
 MODE_STATIC_ON = 'static_on'
 MODE_STATIC_OFF = 'static_off'
 MODE_FLICKER_15 = 'flicker_15hz'
@@ -320,10 +325,10 @@ KNOBS = {
     'period':       ('ring_offset_deg', -STEP_RING, 0.0, 360.0, 'wrap'),
 }
 
-# Stimulus-specific knobs (PRD 4.2-4.5), overlaid on KNOBS once the type is
-# chosen. The same four key pairs are reused with different meanings per type
-# -- the open question in PRD 12.1 -- so the intro tutorial and HUD line 5 both
-# spell out the active legend.
+# Stimulus-specific knobs (PRD 4.1-4.6), overlaid on KNOBS once the type is
+# chosen. The same key pairs are reused with different meanings per type
+# (settled in PRD 15.1), so the intro tutorial and the [M] card both spell out
+# the active legend.
 STEP_SF = 0.5
 STEP_ORI = 5.0
 STEP_PHASE = 0.05
@@ -997,18 +1002,52 @@ def make_test_pattern(res=TEST_PATTERN_RES, cells=TEST_PATTERN_CELLS):
 
 
 def resolve_image(path):
-    """(image for ImageStim, label). Falls back to the generated pattern.
+    """(image for ImageStim, label, failure). Falls back to the generated
+    pattern.
 
-    PRD 4.5: a missing file prints an error and falls back rather than dying --
-    a calibration session should not be lost to a typo in a path.
+    PRD 4.5: a missing file, or one PIL cannot decode, prints a warning and
+    falls back rather than dying -- a calibration session should not be lost
+    to a typo in a path. `failure` is the intro-screen note saying so, or ''.
+    The label is the basename, so no absolute path reaches the JSON.
     """
     if not path:
-        return make_test_pattern(), GENERATED_LABEL
+        return make_test_pattern(), GENERATED_LABEL, ''
+    name = os.path.basename(path)
+    if len(name) > IMAGE_NAME_CHARS:
+        name = '...' + name[-(IMAGE_NAME_CHARS - 3):]
     if not os.path.isfile(path):
         print("ERROR: --image file not found: {}".format(path))
         print("       Falling back to the generated test pattern.")
-        return make_test_pattern(), GENERATED_LABEL
-    return path, os.path.abspath(path)
+        return (make_test_pattern(), GENERATED_LABEL,
+                'NOT FOUND {}, using test pattern'.format(name))
+    try:
+        # ImageStim decodes with PIL too, so this is the same test it would
+        # fail -- but here, before the window and the session exist.
+        from PIL import Image
+        with Image.open(path) as img:
+            img.load()
+    except Exception as err:                                 # noqa: BLE001
+        print("WARNING: --image could not be loaded: {} ({}: {})".format(
+            path, type(err).__name__, err))
+        print("         Falling back to the generated test pattern.")
+        return (make_test_pattern(), GENERATED_LABEL,
+                'FAILED to load {}, using test pattern'.format(name))
+    return path, os.path.basename(path), ''
+
+
+def output_path_label(path):
+    """`path` as written to JSON: relative to OUT_DIR when it lies inside it,
+    otherwise just the basename. No absolute path reaches an output file."""
+    if not path:
+        return path
+    full = os.path.abspath(path)
+    try:
+        rel = os.path.relpath(full, OUT_DIR)
+    except ValueError:            # another drive, on Windows
+        return os.path.basename(full)
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return os.path.basename(full)
+    return rel.replace(os.sep, '/')
 
 
 def gauss_sd_param(size, envelope_sd):
@@ -1421,7 +1460,7 @@ WORKFLOWS = {
         "3. Compare against the same texture rendered by your",
         "   experiment. Any difference is a rendering-path problem,",
         "   not a display one.",
-        "4. Snapshot [S] -- the full path is recorded with it.",
+        "4. Snapshot [S] -- the file name is recorded with it.",
         "",
         "KNOBS: [Z/X] alpha   [R/T] rotation   plus the universal knobs.",
         "Pass a file with:  python monical.py --image path.png",
@@ -1430,7 +1469,7 @@ WORKFLOWS = {
 
 
 def build_intro_text(resolution, refresh_hz, selected_index, image_label,
-                     out_name='', preset_name=''):
+                     out_name='', preset_name='', image_failure=''):
     plugin_line = ('psychopy_visionscience  [OK]' if HAS_RADIAL else
                    'psychopy_visionscience  [FAILED -- '
                    'pip install psychopy-visionscience]')
@@ -1448,6 +1487,9 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label,
     ]
     if preset_name:
         lines.append("Preset:     {}".format(preset_name[-49:]))
+    if image_failure:
+        # Whatever type is selected: the operator passed --image for a reason.
+        lines.append("Image:      {}".format(image_failure))
     lines += [
         "",
         "SELECT STIMULUS TYPE:",
@@ -1481,15 +1523,74 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label,
         "       [9/0] select copy -- [F/J] then sets ITS mode 5 frames",
         "       [/] selected copy: flicker -> steady -> off",
         "[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma",
-        "[Q] quit (saves final state)",
+        "[H] readout  [M] key card  [;/'] distance  [Q]/[ESC] save+quit",
         "",
-        "Press SPACE to begin.",
+        "Press SPACE to begin. Q or ESC here exits without saving.",
     ]
     return "\n".join(lines)
 
 
+def intro_stims(win, resolution, warning=''):
+    """(text, warn) stims for the intro screen, warn None without a warning.
+
+    The wrap box is centred on screen and the text left-aligned inside it, so
+    a box wider than the screen (1.7 units on a 1.33-wide 4:3 panel) would
+    push the first column off the left edge. It is capped to the screen.
+    """
+    wrap = min(INTRO_WRAP_W, resolution[0] / float(resolution[1]) *
+               INTRO_WRAP_FRAC)
+    text = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=INTRO_HEIGHT, color='white',
+        pos=(0, 0), wrapWidth=wrap, alignText='left', anchorHoriz='center',
+        autoLog=False)
+    # Yellow, and a separate stim because TextStim colours the whole block.
+    # Anchored at its bottom edge, so a wrapped warning grows upward.
+    warn = None
+    if warning:
+        warn = visual.TextStim(
+            win, text=warning, font=READOUT_FONT, height=INTRO_HEIGHT,
+            color='yellow', pos=(0, -0.5 + INTRO_MARGIN), wrapWidth=wrap,
+            alignText='center', anchorHoriz='center', anchorVert='bottom',
+            autoLog=False)
+    return text, warn
+
+
+def set_intro_text(win, text, warn, content):
+    """Fill the intro block, centred in the space above the warning.
+
+    The text keeps INTRO_HEIGHT unless the block would not fit there (a long
+    workflow plus the preset and image lines), and only then shrinks. The
+    block's height is predicted the way HudLines does it: pyglet rounds the
+    font to whole points, and each line is ascent - descent of that face.
+    """
+    import pyglet.font
+    win_h = float(win.size[1])
+    top, bottom = 0.5 - INTRO_MARGIN, -0.5 + INTRO_MARGIN
+    if warn is not None:
+        bottom += warn.boundingBox[1] / win_h + INTRO_MARGIN
+    lines = content.count('\n') + 1
+
+    def fits(height):
+        face = pyglet.font.load(READOUT_FONT, int(height * win_h * 0.75))
+        return lines * (face.ascent - face.descent) <= (top - bottom) * win_h
+
+    height = INTRO_HEIGHT
+    if not fits(height):
+        # Largest height that fits, to a few thousandths of a unit.
+        low, high = INTRO_HEIGHT / 2.0, INTRO_HEIGHT
+        for _ in range(7):
+            mid = (low + high) / 2.0
+            low, high = (mid, high) if fits(mid) else (low, mid)
+        height = low
+    if text.height != height:
+        text.height = height
+    text.pos = (0, (top + bottom) / 2.0)
+    text.text = content
+
+
 def show_intro(win, resolution, refresh_hz, image_label, out_name='',
-               preset_name='', selected_index=0, warning=''):
+               preset_name='', selected_index=0, warning='',
+               image_failure=''):
     """White on black. Returns the chosen stimulus type, or None if aborted.
 
     `selected_index` preselects a type -- a loaded preset opens on the type it
@@ -1503,20 +1604,10 @@ def show_intro(win, resolution, refresh_hz, image_label, out_name='',
 
     select_keys = [str(i + 1) for i in range(len(STIMULUS_TYPES))]
     selected_index = int(clamp(selected_index, 0, len(STIMULUS_TYPES) - 1))
-    text = visual.TextStim(
-        win, text=build_intro_text(resolution, refresh_hz, selected_index,
-                                   image_label, out_name, preset_name),
-        font=READOUT_FONT, height=0.020, color='white',
-        pos=(0, 0), wrapWidth=1.7, alignText='left', anchorHoriz='center',
-        autoLog=False)
-
-    # Yellow, and a separate stim because TextStim colours the whole block.
-    warn = None
-    if warning:
-        warn = visual.TextStim(
-            win, text=warning, font=READOUT_FONT, height=0.020,
-            color='yellow', pos=(0, -0.44), wrapWidth=1.7,
-            alignText='center', anchorHoriz='center', autoLog=False)
+    text, warn = intro_stims(win, resolution, warning)
+    set_intro_text(win, text, warn, build_intro_text(
+        resolution, refresh_hz, selected_index, image_label, out_name,
+        preset_name, image_failure))
 
     event.clearEvents()
     while True:
@@ -1540,9 +1631,9 @@ def show_intro(win, resolution, refresh_hz, image_label, out_name='',
                 return None
 
         if dirty:
-            text.text = build_intro_text(
+            set_intro_text(win, text, warn, build_intro_text(
                 resolution, refresh_hz, selected_index, image_label,
-                out_name, preset_name)
+                out_name, preset_name, image_failure))
 
 
 # =============================================================================
@@ -1730,7 +1821,7 @@ def stim_line(state, sweep=None):
                     state['rotation_deg'], state['r'], state['g'],
                     state['b'], state['alpha'])
     if stim_type == STIM_CUSTOM_PNG:
-        # Filename only; the full path goes in the snapshot (PRD 8).
+        # Filename only (PRD 8.3); the snapshot records the same basename.
         return 'File: {} | Alpha: {:.3f} | Rot: {:g} deg'.format(
             os.path.basename(state['image_path']), state['alpha'],
             state['rotation_deg'])
@@ -1798,13 +1889,14 @@ def build_menu_text(state):
         '',
         'MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position',
         'DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast',
-        "FREQUENCY: F/J = Custom flicker +/-1 frame (selected copy) | "
-        ";/' = Viewing distance",
+        'FREQUENCY: F/J = Custom flicker faster/slower (one frame per step)',
+        "DISTANCE:  ;/' = Viewing distance +/-1 cm",
         'MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom',
         '           G=Gamma  7=Multi on/off  8=Uniformity',
         'RING:      [ ] = Copies 2-16 | ,/. = Rotate +/-5 deg | '
         '9/0 = Select copy',
         "           / = Selected copy: flicker -> steady -> off",
+        '           F/J step the selected copy only',
         'ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot',
         '           H=Toggle HUD  M=This menu  Q=Quit',
         '',
@@ -2098,13 +2190,14 @@ def state_record(state, screen_height_cm, refresh_hz=None,
 
 def session_header(win, mon, resolution, screen_height_cm, startup_hz,
                    image_arg, started=None, out_path=None, preset_arg=None,
-                   text_arg=None):
+                   text_arg=None, image_failed=False):
     """Everything about the rig that does not change during the session.
 
     Captured once, at startup, so a reader months later can tell what the
     numbers below were measured on -- which units and colour space they are
     in, how big the screen physically was, and whether the radial plugin was
-    even available.
+    even available. Paths are recorded without directories (output_path_label)
+    so a shared file carries no user or machine names.
     """
     try:
         width_cm = mon.getWidth()
@@ -2140,9 +2233,12 @@ def session_header(win, mon, resolution, screen_height_cm, startup_hz,
         'python_version': sys.version,
         'platform': sys.platform,
         'has_radial_stim': bool(HAS_RADIAL),
-        'image_path': image_arg,
+        'image_path': None if not image_arg else os.path.basename(image_arg),
+        # True when --image was given but missing or undecodable, so the
+        # session ran on the generated test pattern instead.
+        'image_load_failed': bool(image_failed),
         'text_arg': text_arg,
-        'preset_path': preset_arg,
+        'preset_path': output_path_label(preset_arg),
         # The file these values are being written to, recorded inside the file
         # so a renamed copy still says where it came from.
         'output_file': None if out_path is None else os.path.basename(out_path),
@@ -2968,7 +3064,7 @@ def run_bench(args):
     Fullscreen and non-interactive; Q or ESC aborts, and whatever finished is
     still written (the file is rewritten after every configuration).
     """
-    image, image_label = resolve_image(args.image)
+    image, image_label, image_failure = resolve_image(args.image)
     started = datetime.datetime.now()
     out_path = unique_path(os.path.join(
         OUT_DIR, BENCH_NAME_FMT.format(timestamp_slug(started))))
@@ -2985,7 +3081,8 @@ def run_bench(args):
 
     header = session_header(win, mon, resolution, screen_height_cm,
                             refresh_hz, args.image, started=started,
-                            out_path=out_path)
+                            out_path=out_path,
+                            image_failed=bool(image_failure))
     # Session-run fields (presets, final rolling rate, drop total) mean
     # nothing here; drops are per configuration in the results.
     for key in ('preset_path', 'text_arg', 'final_rolling_refresh_hz',
@@ -3085,7 +3182,7 @@ def main(argv=None):
     if args.bench:
         run_bench(args)
         return
-    image, image_label = resolve_image(args.image)
+    image, image_label, image_failure = resolve_image(args.image)
 
     # Fixed once, before anything can write: session_start, the output
     # filename and every generated name this run share one stamp.
@@ -3123,7 +3220,8 @@ def main(argv=None):
                                out_name=os.path.basename(out_path),
                                preset_name=preset_name,
                                selected_index=preset_index,
-                               warning=monitor_warning_text(screen_height_cm))
+                               warning=monitor_warning_text(screen_height_cm),
+                               image_failure=image_failure)
     if stimulus_type is None:
         win.close()
         print("Aborted at intro screen. Nothing written.")
@@ -3187,7 +3285,8 @@ def main(argv=None):
     session = session_header(win, mon, resolution, screen_height_cm,
                              measured_refresh, args.image,
                              started=session_started, out_path=out_path,
-                             preset_arg=args.preset, text_arg=args.text)
+                             preset_arg=args.preset, text_arg=args.text,
+                             image_failed=bool(image_failure))
     timer = FrameTimer(measured_refresh)
 
     # ---- Main loop -----------------------------------------------------------

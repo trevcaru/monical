@@ -113,6 +113,7 @@ The refresh figure is a rolling 120-frame average of real flip-to-flip intervals
   "platform": "win32",
   "has_radial_stim": true,
   "image_path": null,
+  "image_load_failed": false,
   "text_arg": null,
   "preset_path": null,
   "output_file": "monical_2026-08-21_143012.json",

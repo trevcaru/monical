@@ -3,10 +3,10 @@
 """
 Generate the stimulus and screen previews used by README.md and docs/MANUAL.md.
 
-Development tool, not part of Monical. It deliberately does NOT import
-monical.py or PsychoPy: no window is opened, nothing is measured, and it can
-run headless in CI. matplotlib is already a declared PsychoPy dependency, so
-this adds nothing to the runtime requirements.
+Development tool, not part of Monical. It imports monical.py for its
+construction parameters and screen text, so it needs PsychoPy installed, but
+it opens no window and measures nothing. matplotlib is already a declared
+PsychoPy dependency, so this adds nothing to the runtime requirements.
 
     python tools/generate_previews.py
 
@@ -15,23 +15,28 @@ Writes eight 800x500 PNGs into docs/img/, overwriting them.
 The stimulus maths below mirrors PsychoPy's own texture construction so the
 previews are faithful rather than decorative:
 
-  * radial     RadialStim polar mapping of the 4x4 checker texture
+  * radial     RadialStim's polar mapping of monical's checker texture, at
+               monical's default rings and wedges
   * gabor      sin grating multiplied by a Gaussian alpha mask
   * grating    the same sin grating with a hard square edge
-  * custom     the 8x8 fallback pattern monical generates without --image
+  * custom     monical's own make_test_pattern(), used without --image
   * text       the default ABCDEF string in the monospaced face
 
-The HUD and intro text are verbatim snapshots of what monical.py prints, taken
-from build_hud() and build_intro_text(). If either of those changes, re-run
-this script and the images follow.
+The HUD and intro text come from monical's build_hud(), build_status_bar()
+and build_intro_text(). If any of those change, re-run this script and the
+images follow.
 """
 
 import os
+import sys
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')                     # no display needed
 import matplotlib.pyplot as plt           # noqa: E402
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import monical                            # noqa: E402
 
 
 # PsychoPy renders rgb 0.0 as mid-gray, which is 0.5 in matplotlib's 0-1
@@ -62,8 +67,6 @@ PHASE = 0.5
 ENVELOPE_SD = 0.06       # height units -- monical's default
 PREVIEW_SD_PARAM = 3.0   # SDs from centre to patch edge, for the preview
 STIM_SIZE = 0.225        # height units
-CHECKER_CELLS = 8        # the --image fallback pattern
-RADIAL_CELLS = 4         # the 4x4 dartboard texture
 
 FONT = ['DejaVu Sans Mono', 'Consolas', 'Courier New', 'monospace']
 
@@ -144,32 +147,32 @@ def gray_canvas_array(bg, patch, px):
 # Stimuli
 # ---------------------------------------------------------------------------
 
-def checker_texture(n=RADIAL_CELLS):
-    """monical's CHECKER_PATTERN: n x n, sign-balanced per row."""
-    pattern = np.ones((n, n))
-    pattern[::2, ::2] = -1
-    pattern[1::2, 1::2] = -1
-    return pattern
-
-
 def radial_checkerboard(px=420):
-    """RadialStim's polar mapping: radius picks the row, angle the column.
+    """RadialStim's polar mapping of make_radial() at monical's defaults.
 
-    With radialCycles=1 and angularCycles=1 the 4x4 texture spans the radius
-    once and the full 360 degrees once, giving 4 rings by 4 wedges. Outside
-    r = 1 the disc is hard-edged -- no mask, matching the SSVEP construction.
+    RadialStim samples its texture at angular coordinate angle * angularCycles
+    (angle in turns) and radial coordinate 0.25 - radialPhase + r *
+    radialCycles, with r = 1 at the edge. The texture, cycle counts and phase
+    all come from monical, so the preview shows rings x wedges exactly as the
+    tool draws them. Outside r = 1 the disc is hard-edged -- no mask.
     """
-    pattern = checker_texture(RADIAL_CELLS)
+    state = monical.default_state(monical.STIM_RADIAL)
+    radial_cycles, angular_cycles = monical.radial_cycles_for(state)
+    # Texture rows run bottom-up on screen, the reverse of array order
+    # (checked against a rendered make_radial()).
+    pattern = np.flipud(np.asarray(monical.CHECKER_PATTERN, dtype=float))
+    rows, cols = pattern.shape
     x, y = square_grid(px)
     radius = np.hypot(x, y)
-    theta = np.arctan2(y, x) % (2.0 * np.pi)
+    turns = (np.arctan2(y, x) / (2.0 * np.pi)) % 1.0
 
-    ring = np.clip((radius * RADIAL_CELLS).astype(int), 0, RADIAL_CELLS - 1)
-    wedge = np.clip((theta / (2.0 * np.pi) * RADIAL_CELLS).astype(int),
-                    0, RADIAL_CELLS - 1)
+    t_radial = 0.25 - monical.RADIAL_PHASE + radius * radial_cycles
+    t_angular = turns * angular_cycles
+    row = (np.floor(t_radial * rows) % rows).astype(int)
+    col = (np.floor(t_angular * cols) % cols).astype(int)
 
     # -1..+1 texture -> 0..1 luminance, then punch out everything past r = 1.
-    disc = (pattern[ring, wedge] + 1.0) / 2.0
+    disc = (pattern[row, col] + 1.0) / 2.0
     return np.where(radius <= 1.0, disc, PSYCHOPY_GRAY)
 
 
@@ -249,61 +252,30 @@ def text_stimulus_figure():
 
 
 def fallback_checker(px=416):
-    """The 8x8 pattern monical generates when --image is absent."""
-    block = px // CHECKER_CELLS
-    index = np.arange(px) // block
-    pattern = np.where((index[:, None] + index[None, :]) % 2 == 0, 1.0, -1.0)
-    return (pattern + 1.0) / 2.0
+    """The pattern monical generates when --image is absent or unloadable."""
+    return (monical.make_test_pattern(res=px) + 1.0) / 2.0
 
 
 # ---------------------------------------------------------------------------
-# Text screens -- verbatim from monical.py
+# Text screens -- built by monical.py
 # ---------------------------------------------------------------------------
 
-HUD_TEXT = u"""\
-1920x1080 | 239.94 Hz (σ=0.12ms) | Drops: 0 | PsychoPy 2026.2.2 | Dist: 40 cm
-Mode: static_on | Stim: gabor | Out: monical_2026-09-18_143201.json
-X: 0.66 (1672px) | Y: 0.00 (540px) | Size: 0.23 (243px, 10.61 deg) | Ecc: 28.57 deg
-BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 fr, 8 on/8 off) idle
-SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
-[H] Text: ON | [M] Menu: OFF | [F/J] Custom: 15.00 Hz (16 fr, 8 on/8 off) | Mode: static_on | File: monical_2026-09-18_143201.json"""
+PREVIEW_OUT_NAME = 'monical_2026-09-18_143201.json'
 
-INTRO_TEXT = u"""\
-MONICAL -- Monitor Calibration Tool  v0.1
--------------------------------------------------------------
-Monitor:    1920 x 1080  @  239.97 Hz
-PsychoPy:   2026.2.2
-Plugin:     psychopy_visionscience  [OK]
-Output:     monical_2026-09-18_143201.json
 
-SELECT STIMULUS TYPE:
-    [1] Radial checkerboard (SSVEP standard)
-  > [2] Gabor patch (attention/perception)
-    [3] Sinusoidal grating (contrast/SF tuning)
-    [4] Uniform patch (color/luminance calibration)
-    [5] Custom PNG (your own texture)
-    [6] Text / letter string (reading/crowding)
+def intro_text():
+    """The intro screen as build_intro_text() lays it out, Gabor selected."""
+    return monical.build_intro_text((1920, 1080), 239.97, 1,
+                                    monical.GENERATED_LABEL, PREVIEW_OUT_NAME)
 
-1. Gamma calibrate first [G]. Grating luminance is only
-   meaningful on a linearized display.
-2. Static ON [1]: set SF, orientation, phase and envelope
-   SD to the values your experiment uses.
-3. Photometer the mean luminance; it should equal the
-   background at contrast 1.0 if gamma is correct.
-4. Sweep contrast [C/V] and record the curve. Snapshot [S].
 
-KNOBS: [Z/X] SF   [R/T] orientation   [E/W] phase   [D/A] SD
-       plus the universal knobs.
-
-MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz
-       [5] custom Hz  [G] gamma steps  [8] spatial uniformity
-       [7] MULTI ring on/off  [ / ] copies 2-16  [,/.] rotate
-       [9/0] select copy -- [F/J] then sets ITS mode 5 frames
-       [/] selected copy: flicker -> steady -> off
-[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma
-[Q] quit (saves final state)
-
-Press SPACE to begin."""
+def hud_text():
+    """The readout and status bar for a default Gabor session."""
+    state = monical.default_state(monical.STIM_GABOR, 239.97)
+    return '\n'.join([
+        monical.build_hud(state, (1920, 1080), 239.97, 239.94, 33.0,
+                          sd_ms=0.12, drops=0, out_name=PREVIEW_OUT_NAME),
+        monical.build_status_bar(state, PREVIEW_OUT_NAME)])
 
 
 def text_screen(text, fontsize, linespacing=1.35):
@@ -351,10 +323,10 @@ def main():
 
     # 6 lines, longest 130 chars (the status bar): 6.8pt keeps it inside
     # 800px.
-    save(text_screen(HUD_TEXT, 6.8), 'hud_example.png', TEXT_BG)
+    save(text_screen(hud_text(), 6.8), 'hud_example.png', TEXT_BG)
     # 35 lines: 8.0pt at 1.18 spacing fits 800x500. Overflowing text makes
     # bbox_inches='tight' GROW the saved image instead of clipping it.
-    save(text_screen(INTRO_TEXT, 8.0, linespacing=1.18),
+    save(text_screen(intro_text(), 8.0, linespacing=1.18),
          'intro_screen.png', TEXT_BG)
 
     print('Done: {} images.'.format(len(STIMULI) + 3))

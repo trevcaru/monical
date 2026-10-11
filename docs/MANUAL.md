@@ -44,8 +44,10 @@ python monical.py --bench
 
 `--image PATH` supplies the texture for stimulus type `[5]`. Without it, `[5]`
 still works and uses a generated 256×256 checkerboard (8×8 cells). A path that
-does not exist prints an error and falls back to the same generated pattern, so
-a typo never ends the session.
+does not exist, or a file that is not a readable image, prints a warning and
+falls back to the same generated pattern, so a typo never ends the session. The
+intro screen says so (`Image: FAILED to load <name>, using test pattern`) and
+the session file records `image_load_failed: true`.
 
 `--preset PATH` restores knob settings saved earlier with `[P]` (§5f).
 
@@ -85,11 +87,14 @@ White text on black. Five blocks:
 3. **Workflow tutorial** — the recommended procedure and key legend for
    whichever type is selected. It redraws as you press `1`–`6`.
 4. **Modes and actions** — the mode keys, the multi-stimulus ring keys,
-   `S`, `P`, `F12`, `A` and `Q`. The same for every type.
+   `S`, `P`, `F12`, `A`, `H`, `M`, `;`/`'` and `Q`/`ESC`. The same for every
+   type.
 5. **`Press SPACE to begin.`**
 
 The header also shows `Output:` — the filename this session will write to —
-and `Preset:` when one was loaded with `--preset`. Note the output name before
+`Preset:` when one was loaded with `--preset`, and `Image:` when `--image`
+could not be used. On a small or 4:3 screen the text shrinks slightly if the
+longest workflow would not otherwise fit. Note the output name before
 you start; it is fixed for the whole session.
 
 `Q` or `ESC` here aborts without writing a file. You cannot change stimulus
@@ -547,7 +552,7 @@ The JSON has the session file's system header (§6) without `note`,
 | `frames_per_config`, `warmup_frames` | recorded frames (600) and unrecorded warm-up frames (30) per configuration |
 | `mode` | `flicker_15hz`, the mode every configuration runs in |
 | `frame_budget_ms` | 1000 / startup refresh |
-| `texture` | the custom PNG source: the absolute `--image` path, or `<generated 8x8 checkerboard>` |
+| `texture` | the custom PNG source: the `--image` file's basename, or `<generated 8x8 checkerboard>` |
 | `aborted` | `true` if `Q` or `ESC` stopped the run |
 | `results` | one entry per configuration, below |
 
@@ -604,8 +609,9 @@ measurements. Nothing ever reads it back; it exists for you to read.
 | `total_dropped_frames` | frames whose interval exceeded 1.5× the rolling median |
 | `psychopy_version`, `python_version`, `platform` | provenance |
 | `has_radial_stim` | whether the plugin was available |
-| `image_path` | the `--image` argument as given, or `null` |
-| `preset_path` | the `--preset` argument as given, or `null` |
+| `image_path` | the `--image` file's basename, or `null` |
+| `image_load_failed` | `true` when `--image` was given but missing or not a readable image, so the generated pattern was used |
+| `preset_path` | the `--preset` file, relative to the folder holding `monical.py` when inside it, else its basename; `null` without one |
 | `text_arg` | the `--text` argument as given, or `null` |
 | `output_file` | this file's own name, so a renamed copy still says where it came from |
 | `viewing_distance_cm` | distance at quit |
@@ -669,6 +675,10 @@ reading.
 Knob values are stored to 4 decimal places — finer than the HUD displays, so
 nothing you dialed in is lost to rounding.
 
+No output file contains an absolute path: file names are written as basenames,
+or relative to the folder holding `monical.py`, so a file you share carries no
+user or machine names.
+
 `stimulus_specific` carries whatever applies:
 
 | Type | Keys in `stimulus_specific` |
@@ -677,7 +687,7 @@ nothing you dialed in is lost to rounding.
 | `gabor` | `sf`, `ori`, `phase`, `envelope_sd` |
 | `grating` | `sf`, `ori`, `phase`, `waveform`, `mask` |
 | `uniform_patch` | `r`, `g`, `b`, `alpha`, `shape` |
-| `custom_png` | `filepath`, `alpha`, `rotation_deg` |
+| `custom_png` | `filepath` (the image's basename), `alpha`, `rotation_deg` |
 | `text` | `text_string`, `text_preset_index`, `letter_spacing`, `rotation_deg`, `font_family`, `font_requested`, `font_rendered`, `font_fallback`, `alpha`, `r`, `g`, `b` |
 
 Plus, depending on mode: `gamma_level` and `gamma_step_index` in gamma steps;
