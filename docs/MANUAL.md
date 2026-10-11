@@ -113,6 +113,7 @@ until you fix the width in PsychoPy Monitor Center (§8).
 | Ring copies (multi) | `[` / `]` | ±1 | 2 to 16 | single press |
 | Ring offset (multi) | `,` / `.` | ±5° | wraps 0–360 | single press |
 | Select copy (multi) | `9` / `0` | previous / next | wraps | single press |
+| Selected copy state (multi) | `/` | flicker → steady → off | wraps | single press |
 
 Custom flicker is a cycle length in **whole frames**. `F` raises the rate (one
 frame fewer) and `J` lowers it, so every press changes the realized Hz. It
@@ -170,6 +171,19 @@ at 15 or 20 Hz. A new copy starts with the last copy's frames, and copies you
 remove keep their values for the rest of the session if you add them back.
 The readout lists every copy's rate, for example
 `Ring Hz:  1:15.00  2:20.00 ASYM  3*:12.00`, with the selected one starred.
+
+`/` cycles the selected copy through **flicker**, **steady** and **off**. A
+steady copy stays on through every flicker mode, a constant-luminance
+neighbour for comparison. An off copy is never drawn, so you can take one copy
+out of the layout without changing the count. The ring line shows `STEADY` or
+`--` for them.
+
+Copies can land off screen: the ring's radius is |X|, so at the default
+X = 0.66 copies above and below fixation sit past the top and bottom edges.
+Line 2 shows `OFFSCREEN n` when any copy is cut off. A `!` after a copy's
+number on the ring line marks it, and if it is the selected one the status
+bar says `SELECTED #k OFF SCREEN`. Line 3's eccentricity becomes the
+selected copy's, labelled `Ecc(#k)`.
 
 ### Actions
 

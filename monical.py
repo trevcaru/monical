@@ -93,7 +93,8 @@ SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
 # are not carried in a preset. `aspect` comes from the window, `image_path`
 # from --image, and the other two are live loop bookkeeping.
 PRESET_EXCLUDE = ('frame_idx', 'snapshots', 'aspect', 'image_path',
-                  'win_w', 'win_h', 'font_requested', 'font_rendered')
+                  'win_w', 'win_h', 'font_requested', 'font_rendered',
+                  'text_extent')
 
 SETTLE_S = 2.0                    # auto gamma dwell per level (PRD 6.5)
 
@@ -213,6 +214,10 @@ DUAL_KEY = '7'
 MULTI_MIN, MULTI_MAX = 2, 16
 STEP_RING = 5.0
 SELECT_PREV, SELECT_NEXT = '9', '0'
+# [/] cycles the selected copy's state (PRD 6.3). 'steady' is drawn on every
+# frame of a flicker mode; 'off' is never drawn.
+COPY_STATE_KEY = 'slash'
+COPY_STATES = ['flicker', 'steady', 'off']
 
 # Selection marker (PRD 6.3): a short thin tick pointing at the selected copy,
 # drawn with the readout. It sits outside every copy's footprint circle -- a
@@ -535,6 +540,8 @@ def key_claim(state, key, sweeping=False):
         return 'dual'
     if key in (SELECT_PREV, SELECT_NEXT):
         return 'select'           # inert while multi is off
+    if key == COPY_STATE_KEY:
+        return 'copy_state'       # inert while multi is off
     # [A] is a knob on several types, so gamma mode claims it for the sweep.
     if key == 'a' and state['mode'] == MODE_GAMMA:
         return 'sweep_toggle'
@@ -624,11 +631,20 @@ def sync_stim_frames(state):
     A copy beyond anything remembered takes the frames of the current last
     copy; one that existed earlier in the session gets its own value back.
     """
-    frames = state['stim_frames']
-    while len(frames) < state['multi_count']:
-        frames.append(frames[-1])
+    for key in ('stim_frames', 'stim_states'):
+        values = state[key]
+        while len(values) < state['multi_count']:
+            values.append(values[-1])
     state['selected_index'] = min(state['selected_index'],
                                   state['multi_count'] - 1)
+
+
+def copy_states(state):
+    """flicker / steady / off for each drawn copy. One 'flicker' copy when
+    multi is off: the single stimulus behaves exactly as before."""
+    if not state['multi']:
+        return ['flicker']
+    return list(state['stim_states'][:state['multi_count']])
 
 
 def copy_frames(state, refresh_hz):
@@ -651,17 +667,49 @@ def copy_frames(state, refresh_hz):
 def drawn_positions(state, refresh_hz):
     """Positions drawn THIS frame (PRD 6.1, 6.3).
 
-    Copy i is on iff (frame_idx % frames_i) < frames_i // 2 -- stim_is_on,
-    stateless in the one shared frame_idx, which resets on a mode switch.
+    A 'flicker' copy is on iff (frame_idx % frames_i) < frames_i // 2 --
+    stim_is_on, stateless in the one shared frame_idx, which resets on a mode
+    switch. A 'steady' copy is on in every frame; an 'off' copy never is.
     """
     if state['mode'] == MODE_STATIC_OFF:
         return []
     positions = ring_positions(state)
-    frames = copy_frames(state, refresh_hz)
-    if frames is None:
-        return positions
-    return [pos for pos, n in zip(positions, frames)
-            if stim_is_on(state['frame_idx'], n)]
+    frames = copy_frames(state, refresh_hz) or [None] * len(positions)
+    drawn = []
+    for pos, n, copy_state in zip(positions, frames, copy_states(state)):
+        if copy_state == 'off':
+            continue
+        if n is None or copy_state == 'steady' or stim_is_on(
+                state['frame_idx'], n):
+            drawn.append(pos)
+    return drawn
+
+
+def copy_half_extent(state):
+    """(half width, half height) of one copy's axis-aligned bounding box.
+
+    Text uses its string extent; every other type a size x size square. The
+    box turns with the copy where the type turns: text and PNG rotation,
+    grating and Gabor orientation.
+    """
+    width, height = state['text_extent'] or (state['size'], state['size'])
+    stim_type = state['stimulus_type']
+    if stim_type in (STIM_TEXT, STIM_CUSTOM_PNG):
+        angle = math.radians(state['rotation_deg'])
+    elif stim_type in (STIM_GRATING, STIM_GABOR):
+        angle = math.radians(state['ori'])
+    else:
+        angle = 0.0
+    c, s_ = abs(math.cos(angle)), abs(math.sin(angle))
+    return (width * c + height * s_) / 2.0, (width * s_ + height * c) / 2.0
+
+
+def offscreen_copies(state):
+    """One bool per copy: True if any part of it falls outside the window."""
+    hx, hy = copy_half_extent(state)
+    half_w = state['aspect'] / 2.0
+    return [x - hx < -half_w or x + hx > half_w or y - hy < -0.5 or
+            y + hy > 0.5 for x, y in ring_positions(state)]
 
 
 def footprint_radius(state, extent=None):
@@ -670,7 +718,8 @@ def footprint_radius(state, extent=None):
     `extent` is (width, height) for text, whose string can be far wider than
     the size knob; every other type fits in a size x size square.
     """
-    width, height = extent if extent else (state['size'], state['size'])
+    width, height = (extent or state['text_extent'] or
+                     (state['size'], state['size']))
     return 0.5 * math.hypot(width, height)
 
 
@@ -841,6 +890,11 @@ def default_state(stimulus_type, refresh_hz=60.0):
         'stim_frames': [hz_to_frames(DEFAULT_CUSTOM_HZ, refresh_hz)] *
                        MULTI_MIN,
         'selected_index': 0,
+        # Per-copy state, remembered past the count like stim_frames.
+        'stim_states': ['flicker'] * MULTI_MIN,
+        # Text only: (width, height) of the string, set by the main loop from
+        # the GlyphString so footprints know how wide the copies are.
+        'text_extent': None,
         'refresh_hz': refresh_hz,
         'viewing_distance_cm': 40,
 
@@ -1389,6 +1443,7 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label,
         "       [5] custom Hz  [G] gamma steps  [8] spatial uniformity",
         "       [7] MULTI ring on/off  [ / ] copies 2-16  [,/.] rotate",
         "       [9/0] select copy -- [F/J] then sets ITS mode 5 frames",
+        "       [/] selected copy: flicker -> steady -> off",
         "[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma",
         "[Q] quit (saves final state)",
         "",
@@ -1526,10 +1581,12 @@ def mode_line(state):
     else:
         parts.append('Stim: {}'.format(state['stimulus_type']))
     if state['multi']:
-        parts.append('MULTI {} r {:.2f} off {:g}{}'.format(
+        offscreen = sum(offscreen_copies(state))
+        parts.append('MULTI {} r {:.2f} off {:g}{}{}'.format(
             state['multi_count'], abs(state['x_pos']),
             state['ring_offset_deg'],
-            ' OVERLAP' if ring_overlap(state) else ''))
+            ' OVERLAP' if ring_overlap(state) else '',
+            ' OFFSCREEN {}'.format(offscreen) if offscreen else ''))
     return ' | '.join(parts)
 
 
@@ -1603,15 +1660,21 @@ def build_status_bar(state, out_name=''):
     name = out_name or '-'
     if len(name) > STATUS_NAME_CHARS:
         name = '...' + name[-(STATUS_NAME_CHARS - 3):]
+    # The selected copy can sit off screen at default settings; say so here
+    # too, since this line never hides.
+    lost = (state['multi'] and
+            offscreen_copies(state)[selected(state)])
     return ('[{}] Text: {} | [{}] Menu: {} | [F/J] Custom: {} | '
-            'Mode: {} | File: {}').format(
+            'Mode: {}{} | File: {}').format(
                 HUD_TOGGLE_KEY.upper(),
                 'ON' if state['hud_visible'] else 'OFF',
                 MENU_TOGGLE_KEY.upper(),
                 'ON' if state['menu_visible'] else 'OFF',
                 flicker_text(state['stim_frames'][selected(state)],
                              state['refresh_hz']),
-                mode_label(state, state['refresh_hz']), name)
+                mode_label(state, state['refresh_hz']),
+                ' | SELECTED #{} OFF SCREEN'.format(selected(state) + 1)
+                if lost else '', name)
 
 
 MENU_STIM_KEYS = {
@@ -1640,8 +1703,9 @@ def build_menu_text(state):
         ";/' = Viewing distance",
         'MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom',
         '           G=Gamma  7=Multi on/off  8=Uniformity',
-        'RING:      [/] = Copies 2-16 | ,/. = Rotate +/-5 deg | '
+        'RING:      [ ] = Copies 2-16 | ,/. = Rotate +/-5 deg | '
         '9/0 = Select copy',
+        "           / = Selected copy: flicker -> steady -> off",
         'ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot',
         '           H=Toggle HUD  M=This menu  Q=Quit',
         '',
@@ -1684,6 +1748,14 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
     ecc_deg = eccentricity_deg(state['x_pos'], screen_height_cm,
                                state['viewing_distance_cm'])
     px_x, px_y, px_size = to_pixels(state)
+    ecc_label = 'Ecc'
+    if state['multi']:
+        # The selected copy's own distance from fixation, as in the JSON.
+        sel_x, sel_y = ring_positions(state)[selected(state)]
+        ecc_deg = eccentricity_deg(math.hypot(sel_x, sel_y),
+                                   screen_height_cm,
+                                   state['viewing_distance_cm'])
+        ecc_label = 'Ecc(#{})'.format(selected(state) + 1)
 
     # While flickering, report what the active mode realises. Otherwise report
     # what the standing custom setting WOULD realise, marked idle so nobody
@@ -1710,9 +1782,9 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
         # Degrees need the monitor's physical size and go '--' without it;
         # pixels only need the window, so they are always available.
         'X: {:.2f} ({}px) | Y: {:.2f} ({}px) | Size: {:.2f} ({}px, {} deg) '
-        '| Ecc: {} deg'.format(
+        '| {}: {} deg'.format(
             state['x_pos'], px_x, state['y_pos'], px_y, state['size'],
-            px_size, _deg(size_deg), _deg(ecc_deg)),
+            px_size, _deg(size_deg), ecc_label, _deg(ecc_deg)),
         'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
             state['bg_gray'], state['contrast'], freq_text),
     ] + wrap_hud_line(stim_line(state, sweep), hud_line_chars(state))
@@ -1728,11 +1800,19 @@ def ring_lines(state, refresh_hz):
     if frames is None:
         frames = state['stim_frames'][:state['multi_count']]
     entries = []
-    for i, n in enumerate(frames):
+    offscreen = offscreen_copies(state)
+    for i, (n, copy_state) in enumerate(zip(frames, copy_states(state))):
         on, off = flicker_split(n)
-        entries.append('{}{}:{:.2f}{}'.format(
-            i + 1, '*' if i == selected(state) else '',
-            frames_to_hz(n, refresh_hz), ' ASYM' if on != off else ''))
+        name = '{}{}{}'.format(i + 1, '*' if i == selected(state) else '',
+                               '!' if offscreen[i] else '')
+        if copy_state == 'steady':
+            entries.append(name + ':STEADY')
+        elif copy_state == 'off':
+            entries.append(name + ':--')
+        else:
+            entries.append('{}:{:.2f}{}'.format(
+                name, frames_to_hz(n, refresh_hz),
+                ' ASYM' if on != off else ''))
     lines, line = [], 'Ring Hz:'
     budget = hud_line_chars(state)
     for entry in entries:
@@ -1845,6 +1925,7 @@ def stimuli_record(state, screen_height_cm, refresh_hz):
         frames = ([state['stim_frames'][0]] if not state['multi'] else
                   state['stim_frames'][:len(positions)])
     record = []
+    states, offscreen = copy_states(state), offscreen_copies(state)
     for index, ((x, y), n) in enumerate(zip(positions, frames)):
         ecc = eccentricity_deg(math.hypot(x, y), screen_height_cm,
                                state['viewing_distance_cm'])
@@ -1854,7 +1935,9 @@ def stimuli_record(state, screen_height_cm, refresh_hz):
                        'ecc_deg': None if ecc is None else round(ecc, 2),
                        'flicker_frames': n, 'on_frames': on,
                        'off_frames': off,
-                       'realized_hz': round(frames_to_hz(n, refresh_hz), 3)})
+                       'realized_hz': round(frames_to_hz(n, refresh_hz), 3),
+                       'flicker_state': states[index],
+                       'offscreen': offscreen[index]})
     return record
 
 
@@ -2097,6 +2180,7 @@ def preset_from_state(state):
     preset = {key: value for key, value in state.items()
               if key not in PRESET_EXCLUDE}
     preset['stim_frames'] = list(state['stim_frames'][:state['multi_count']])
+    preset['stim_states'] = list(state['stim_states'][:state['multi_count']])
     return preset
 
 
@@ -2207,6 +2291,31 @@ def preset_stim_frames(loaded, refresh_hz, count):
     return values[:count]
 
 
+def preset_stim_states(loaded, count):
+    """Per-copy flicker/steady/off from a preset, or None if it has none.
+
+    Unknown values become 'flicker'; a list that does not match the count is
+    padded with its last value or truncated, each with a console note.
+    """
+    values = loaded.get('stim_states')
+    if not isinstance(values, list) or not values:
+        return None
+    states = []
+    for value in values:
+        if value not in COPY_STATES:
+            print("Preset: copy state {!r} -> 'flicker' (not one of {})"
+                  .format(value, COPY_STATES))
+            value = 'flicker'
+        states.append(value)
+    if len(states) != count:
+        print("Preset: {} copy state(s) for {} copies -- {}".format(
+            len(states), count, 'padded with the last' if len(states) < count
+            else 'extra dropped'))
+    while len(states) < count:
+        states.append(states[-1])
+    return states[:count]
+
+
 def preset_flicker_frames(loaded, refresh_hz):
     """One mode 5 frame count a preset asks for at THIS refresh, or None.
 
@@ -2266,7 +2375,7 @@ def apply_preset(state, loaded, text_presets=None):
             print("Preset: dual -> multi-stimulus ring, 2 copies, offset 0")
     frames_source = dict(loaded)
     # refresh_hz describes the rig a preset was saved on, never this one.
-    for key in ('stim_frames', 'flicker_frames', 'refresh_hz',
+    for key in ('stim_frames', 'stim_states', 'flicker_frames', 'refresh_hz',
                 'custom_freq_hz', 'selected_index'):
         loaded.pop(key, None)
     ranges = param_ranges(state['refresh_hz'])
@@ -2287,6 +2396,9 @@ def apply_preset(state, loaded, text_presets=None):
             sanitize_report('flicker_frames', value,
                             state['stim_frames'][0], ranges)
             for value in frames]
+    states = preset_stim_states(frames_source, state['multi_count'])
+    if states is not None:
+        state['stim_states'] = states
     sync_stim_frames(state)
     index = frames_source.get('selected_index', 0)
     state['selected_index'] = (int(clamp(int(index), 0,
@@ -2611,6 +2723,13 @@ def main(argv=None):
                     state['selected_index'] = (
                         (selected(state) + step) % state['multi_count'])
                 continue
+            if claim == 'copy_state':
+                if state['multi']:
+                    states, index = state['stim_states'], selected(state)
+                    states[index] = COPY_STATES[
+                        (COPY_STATES.index(states[index]) + 1) %
+                        len(COPY_STATES)]
+                continue
 
             # --- Auto gamma sweep (PRD 6.5). [A] is a knob on several stimulus
             # types, so gamma mode has to claim it the way it claims the
@@ -2735,6 +2854,7 @@ def main(argv=None):
                 family = state['font_family']
                 state['font_requested'], state['font_rendered'] = fonts[family]
                 stim.update(state)
+                state['text_extent'] = stim.extent()
             else:
                 stim.size = state['size']
             if stimulus_type in (STIM_GABOR, STIM_GRATING):
@@ -2808,8 +2928,7 @@ def main(argv=None):
         # photometer or screenshot frame never carries it (PRD 6.3).
         if (state['hud_visible'] and state['multi'] and
                 mode not in (MODE_GAMMA, MODE_UNIFORMITY)):
-            extent = stim.extent() if stimulus_type == STIM_TEXT else None
-            segment = marker_segment(state, footprint_radius(state, extent))
+            segment = marker_segment(state, footprint_radius(state))
             if segment is not None:
                 marker.vertices = list(segment)
                 marker.draw()

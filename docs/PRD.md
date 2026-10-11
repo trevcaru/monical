@@ -428,7 +428,7 @@ Toggled by number keys. Active across all stimulus types.
 | `[4]` | Flicker 20 Hz | Nearest whole-frame cycle: 12 frames at 240 Hz, 3 at 60 Hz (1 on/2 off), 7 at 144 Hz (20.57 Hz, 3 on/4 off). Oscilloscope check. |
 | `[5]` | Flicker custom | Cycle of `[F/J]` whole frames. Shows realized Hz and the on/off split. |
 | `[G]` | Gamma steps | Full-screen uniform patch, 11 levels (0%–100%). LEFT/RIGHT to step. Fixation cross hidden. |
-| `[7]` | Multi-stimulus | Toggles N copies on a ring through (X, Y); `[ / ]` set N (2–16), `[, / .]` rotate, `[9 / 0]` select a copy whose mode 5 frames `[F/J]` then set (§6.3). N = 2 is the original ±X dual layout. |
+| `[7]` | Multi-stimulus | Toggles N copies on a ring through (X, Y); `[ / ]` set N (2–16), `[, / .]` rotate, `[9 / 0]` select a copy whose mode 5 frames `[F/J]` then set, `[/]` cycles it flicker/steady/off (§6.3). N = 2 is the original ±X dual layout. |
 | `[8]` | Spatial uniformity | Uniform patch movable to a 3×3 grid (center, corners, midpoints). Arrow keys move between grid positions. |
 
 Non-mode action keys, active throughout the test routine:
@@ -450,7 +450,7 @@ def stim_is_on(frame_idx, frames):
 
 Stateless, pure in frame_idx. Phase resets on every mode switch. Identical to the SSVEP experiment's drive logic.
 
-With multi-stimulus on (§6.3), each copy *i* has its own count and is ON iff `(frame_idx % frames_i) < frames_i // 2`. That is the same `stim_is_on`, with one shared `frame_idx` that resets on every mode switch, so the copies stay stateless and their phases are fixed relative to each other.
+With multi-stimulus on (§6.3), each copy *i* has its own count and is ON iff `(frame_idx % frames_i) < frames_i // 2`. That is the same `stim_is_on`, with one shared `frame_idx` that resets on every mode switch, so the copies stay stateless and their phases are fixed relative to each other. This applies to copies in the `flicker` state; a `steady` copy is drawn on every frame and an `off` copy never (§6.3).
 
 Each cycle is `on = frames // 2` frames ON and `off = frames - on` frames OFF. An odd count is asymmetric, with the shorter half ON, and the readout marks it `ASYM`.
 
@@ -490,15 +490,27 @@ All copies share every parameter except their mode 5 frame count.
 
 Raising the count gives a new copy the frames of the current last copy. Lowering it drops copies from the end, but their frame counts are remembered for the rest of the session, so raising the count again brings them back. Only the active copies' values go into a preset.
 
+**Per-copy state.** Each copy is `flicker` (the default), `steady` or `off`. `[/]` cycles the selected copy through flicker → steady → off → flicker; it is single-press and does nothing while multi is off.
+
+| State | Static ON (1) | Flicker modes (3, 4, 5) | Static OFF (2) |
+|---|---|---|---|
+| flicker | drawn | follows its frame count exactly as §6.1 | not drawn |
+| steady | drawn | drawn on every frame | not drawn |
+| off | not drawn | not drawn | not drawn |
+
+The flicker formula is unchanged for `flicker` copies. Raising and lowering the count treats states like frame counts: a new copy takes the last copy's state, and dropped states come back if the count is raised again in the same session. *Verified* with N = 4, states [flicker, steady, off, flicker] and frames [3, 4, 5, 6] in mode 5, over 120 rendered frames (two LCM cycles). The flicker copies matched their formula on every frame, the steady copy was on in all 120 and the off copy in none. Modes 3 and 4 behaved the same.
+
+**Off-screen copies.** The ring radius is |X|, so at the default X = 0.66 copies at the top and bottom of the ring sit beyond the screen (half-height 0.5). A copy counts as off screen if any part of its bounding box falls outside the window. The box is the size square, or the string's advance box for text, turned with the copy's rotation (text, PNG) or orientation (grating, Gabor). Line 2 shows `OFFSCREEN n` when any copy is affected. A selected copy that is off screen is marked `!` on the ring line (`2*!`), and the status bar adds `SELECTED #2 OFF SCREEN`. *Verified* against rendered pixel area: at X = 0.66, N = 3 it flags 2 copies, at X = 0.2, N = 8 with size 0.05 it flags 0, and the flags matched clipping in every case tested.
+
 **Selection marker.** A short thin yellow tick points at the selected copy. It is drawn only while the readout is visible, so `[H]` removes it from photometer readings and screenshots. It is placed radially outward first, then swung round in 30° steps, and used only where it stays clear of **every** copy's footprint circle: half the diagonal of the size square, or of the string's advance box for text. If no direction is clear, it is not drawn. *Verified* with a stimuli-only mask against a marker-only mask: no shared pixel in 102 square-footprint ring layouts (N 2–16, three sizes, both signs of X, several selections) or in text rings. With `[H]` off, the real loop's frame has zero marker pixels.
 
 **Overlap warning.** When the chord between neighbours, `2 * r * sin(pi / N)`, is less than the stimulus size, readout line 2 shows `OVERLAP`. Nothing is moved; the operator decides.
 
-**Eccentricity.** Each copy's eccentricity is the existing displacement formula (§7) applied to its own distance from fixation, `sqrt(x_i^2 + y_i^2)`.
+**Eccentricity.** Each copy's eccentricity is the existing displacement formula (§7) applied to its own distance from fixation, `sqrt(x_i^2 + y_i^2)`. With multi on, readout line 3 shows the selected copy's value, labelled `Ecc(#3)`, the same number as its JSON entry. With multi off, line 3 is unchanged.
 
-**Snapshot fields:** `multi_active`, `multi_count`, `ring_offset_deg`, `ring_radius`, `ring_center_y`, `selected_index`, and `stimuli`, a list of `{index, x, y, ecc_deg, flicker_frames, on_frames, off_frames, realized_hz}` (one entry when multi is off). Each entry's cycle is the active flicker mode's, or the copy's mode 5 setting when nothing is flickering. The top-level `flicker_*` fields and `custom_frequency_hz` describe the selected copy. `dual_stimulus` is kept for back-compatibility: it is true only when multi is on with N = 2, the layout the old flag meant.
+**Snapshot fields:** `multi_active`, `multi_count`, `ring_offset_deg`, `ring_radius`, `ring_center_y`, `selected_index`, and `stimuli`, a list of `{index, x, y, ecc_deg, flicker_frames, on_frames, off_frames, realized_hz, flicker_state, offscreen}` (one entry when multi is off). Each entry's cycle is the active flicker mode's, or the copy's mode 5 setting when nothing is flickering. The top-level `flicker_*` fields and `custom_frequency_hz` describe the selected copy. `dual_stimulus` is kept for back-compatibility: it is true only when multi is on with N = 2, the layout the old flag meant.
 
-**Presets** save `multi`, `multi_count`, `ring_offset_deg`, `selected_index` and `stim_frames`, the active copies' frame counts, with the refresh they were saved at. Each count gets the same refresh-mismatch conversion as §10. A list that does not match the count is padded with its last value or truncated, with a console note. An older preset's single `flicker_frames` or `custom_freq_hz` applies to every copy. A preset from before the ring with `dual: true` loads as multi on, N = 2, offset 0, with a console line. The count is clamped to 2–16 and the offset wraps into 0–360.
+**Presets** save `multi`, `multi_count`, `ring_offset_deg`, `selected_index`, `stim_states` and `stim_frames`, the active copies' frame counts, with the refresh they were saved at. Each count gets the same refresh-mismatch conversion as §10. A list that does not match the count is padded with its last value or truncated, with a console note. An older preset's single `flicker_frames` or `custom_freq_hz` applies to every copy. States are sanitized: an unknown value becomes `flicker` and a length mismatch is padded or truncated, each with a console note. A preset without states loads every copy as `flicker`. A preset from before the ring with `dual: true` loads as multi on, N = 2, offset 0, with a console line. The count is clamped to 2–16 and the offset wraps into 0–360.
 
 ### 6.4 Spatial uniformity mode
 
@@ -550,13 +562,13 @@ Bottom center, small monospace text, updates every frame. Adapts to the current 
 
 ```
 Line 1: [resolution] | [refresh Hz avg] | PsychoPy [ver] | Dist: [cm] cm
-Line 2: Mode: [name] | Stim: [type] [| MULTI N r [radius] off [deg] [OVERLAP]]
-Line 3: X: [val] | Y: [val] | Size: [val] ([deg]°) | Ecc: [deg]°
+Line 2: Mode: [name] | Stim: [type] [| MULTI N r [radius] off [deg] [OVERLAP] [OFFSCREEN n]]
+Line 3: X: [val] | Y: [val] | Size: [val] ([deg]°) | Ecc: [deg]°   (multi: Ecc(#k), the selected copy)
 Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] fr, [on] on/[off] off) [ASYM]
 Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
 ```
 
-With multi on, the readout adds a ring line listing every copy's realised rate, with `ASYM` marks and the selected copy starred, wrapped onto as many lines as the screen width needs: `Ring Hz:  1:15.00  2:20.00 ASYM  3*:12.00 ...`. The readout grows upward, so its bottom edge stays clear of the status bar. Line 4 and the status bar's `[F/J] Custom` field show the selected copy.
+With multi on, the readout adds a ring line listing every copy's realised rate, with `ASYM` marks and the selected copy starred, wrapped onto as many lines as the screen width needs: `Ring Hz:  1:20.00 ASYM  2:STEADY  3*:--  4:10.00`. A steady copy shows `STEADY`, an off copy `--`, and an off-screen copy `!` after its number. The readout grows upward, so its bottom edge stays clear of the status bar. Line 4 and the status bar's `[F/J] Custom` field show the selected copy.
 
 Modes 3 and 4 show their target and the realised rate in the mode name, on line 2 and in the status bar: `Flicker 15 (14.40 Hz)` or `Flicker 20 (20.57 Hz ASYM)` at 144 Hz. The JSON `mode` field keeps the plain identifier (`flicker_15hz`). Mode 5's rate is on line 4 and in the status bar's `[F/J] Custom` field.
 
@@ -612,7 +624,8 @@ DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast
 FREQUENCY: F/J = Custom flicker +/-1 frame (selected copy) | ;/' = Viewing distance
 MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom
            G=Gamma  7=Multi on/off  8=Uniformity
-RING:      [/] = Copies 2-16 | ,/. = Rotate +/-5 deg | 9/0 = Select copy
+RING:      [ ] = Copies 2-16 | ,/. = Rotate +/-5 deg | 9/0 = Select copy
+           / = Selected copy: flicker -> steady -> off
 ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot
            H=Toggle HUD  M=This menu  Q=Quit
 
