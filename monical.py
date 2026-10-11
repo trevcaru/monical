@@ -279,7 +279,13 @@ _GRATING_KNOBS = {
 }
 
 STIM_KNOBS = {
-    STIM_RADIAL: {},                          # locked to the standard form
+    # Wedges step by 2 from an even default, so they stay even.
+    STIM_RADIAL: {
+        'z': ('rings', +1, 1, 20, 'int'),
+        'x': ('rings', -1, 1, 20, 'int'),
+        'r': ('wedges', +2, 2, 32, 'int'),
+        't': ('wedges', -2, 2, 32, 'int'),
+    },
     STIM_GABOR: dict(_GRATING_KNOBS, **{
         'd': ('envelope_sd', +STEP_SD, 0.01, 1.0, 'float'),
         'a': ('envelope_sd', -STEP_SD, 0.01, 1.0, 'float'),
@@ -352,13 +358,14 @@ MIN_DROP_SAMPLES = 15
 DIVERGENCE_WARN_HZ = 5.0
 
 
-# The 4x4 balanced checker texture (PRD 4.1). Every row carries two +1 and two
-# -1, so each annulus of the radial warp is sign-balanced independently of
-# unequal annulus areas. Defined here so the construction is locked to the
-# standard form before any stimulus code is written against it.
-CHECKER_PATTERN = np.ones((4, 4))
-CHECKER_PATTERN[::2, ::2] = -1
-CHECKER_PATTERN[1::2, 1::2] = -1
+# The radial checker texture (PRD 4.1): one full cycle per axis, so
+# radialCycles = rings / 2 and angularCycles = wedges / 2. Every row is
+# sign-balanced, so each annulus is too, independently of annulus area.
+CHECKER_PATTERN = np.array([[1, -1], [-1, 1]])
+
+RADIAL_PHASE = 0.25               # see make_radial
+DEFAULT_RINGS = 4
+DEFAULT_WEDGES = 16
 
 
 def stim_is_on(frame_idx, frames):
@@ -636,6 +643,10 @@ def default_state(stimulus_type):
         'win_w': 1920,
         'win_h': 1080,
 
+        # Radial checkerboard (PRD 4.1)
+        'rings': DEFAULT_RINGS,
+        'wedges': DEFAULT_WEDGES,
+
         # Grating / Gabor (PRD 4.2, 4.3)
         'sf': 4.0,
         'ori': 0.0,
@@ -722,6 +733,27 @@ def gauss_sd_param(size, envelope_sd):
     """
     radius = max(size, 1e-6) / 2.0
     return radius / max(envelope_sd, 1e-6)
+
+
+def radial_cycles_for(state):
+    """(radialCycles, angularCycles) for the 2x2 tex: one cycle = two checks."""
+    return state['rings'] / 2.0, state['wedges'] / 2.0
+
+
+def make_radial(win, state):
+    """PRD 4.1 RadialStim. Do not add a mask or change texRes."""
+    radial_cycles, angular_cycles = radial_cycles_for(state)
+    # RadialStim's radial texcoord starts at 0.25 - radialPhase: one texel on
+    # the old 4x4 tex, but half a texel on this 2x2. radialPhase=0.25 cancels
+    # it, so rings=N draws N full-width rings from the centre, and the
+    # defaults are pixel-identical to the v1 construction.
+    return RadialStim(
+        win=win, tex=CHECKER_PATTERN, size=state['size'],
+        radialCycles=radial_cycles, angularCycles=angular_cycles,
+        radialPhase=RADIAL_PHASE, texRes=256, opacity=1,
+        contrast=state['contrast'],
+        pos=(state['x_pos'], state['y_pos']),
+        name='calib_disc', autoLog=False)
 
 
 # =============================================================================
@@ -828,8 +860,9 @@ WORKFLOWS = {
         "4. Snapshot [S] at each matched position.",
         "5. Flicker [3][4][5]: photodiode + scope, check waveform.",
         "",
-        "KNOBS: [ARROWS] move stimulus X/Y   [PAGEUP/PAGEDN] BG",
-        "       [+/-] size   [C/V] contrast   [F/H] custom Hz",
+        "KNOBS: [Z/X] rings   [R/T] wedges   [ARROWS] move X/Y",
+        "       [PAGEUP/PAGEDN] BG   [+/-] size   [C/V] contrast",
+        "       [F/J] custom Hz",
     ],
     STIM_GABOR: [
         "1. Gamma calibrate first [G]. Grating luminance is only",
@@ -1052,6 +1085,8 @@ def stim_line(state, sweep=None):
         return ('Spatial uniformity: ARROWS move the patch across the 3x3 '
                 'grid | fixation hidden')
     stim_type = state['stimulus_type']
+    if stim_type == STIM_RADIAL:
+        return 'Rings: {} | Wedges: {}'.format(state['rings'], state['wedges'])
     if stim_type in (STIM_GABOR, STIM_GRATING):
         line = 'SF: {:.2f} c/unit | Ori: {:.1f} deg | Phase: {:.2f}'.format(
             state['sf'], state['ori'], state['phase'])
@@ -1072,7 +1107,7 @@ def stim_line(state, sweep=None):
         # Filename only; the full path goes in the snapshot (PRD 8).
         return 'File: {} | Alpha: {:.3f}'.format(
             os.path.basename(state['image_path']), state['alpha'])
-    return 'No stimulus-specific parameters (construction locked)'
+    return 'No stimulus-specific parameters'
 
 
 def build_status_bar(state, out_name=''):
@@ -1095,7 +1130,7 @@ def build_status_bar(state, out_name=''):
 
 
 MENU_STIM_KEYS = {
-    STIM_RADIAL: 'none -- construction locked to the SSVEP standard form',
+    STIM_RADIAL: 'Z/X = Rings | R/T = Wedges (+/-2)',
     STIM_GABOR: 'Z/X = SF | R/T = Orientation | E/W = Phase | D/A = Env SD',
     STIM_GRATING: 'Z/X = SF | R/T = Orientation | E/W = Phase',
     STIM_UNIFORM: 'R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha',
@@ -1180,9 +1215,18 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
 # =============================================================================
 
 def stimulus_specific(state):
-    """Per-type parameters. Radial has none beyond universal (PRD 4.1)."""
+    """Per-type parameters, including the RadialStim kwargs radial derives."""
     stim_type = state['stimulus_type']
-    if stim_type == STIM_GABOR:
+    if stim_type == STIM_RADIAL:
+        radial_cycles, angular_cycles = radial_cycles_for(state)
+        record = {
+            'rings': state['rings'],
+            'wedges': state['wedges'],
+            'radialCycles': radial_cycles,
+            'angularCycles': angular_cycles,
+            'radialPhase': RADIAL_PHASE,
+        }
+    elif stim_type == STIM_GABOR:
         record = {
             'sf': round(state['sf'], STORE_DP),
             'ori': round(state['ori'], STORE_DP),
@@ -1611,13 +1655,7 @@ def main(argv=None):
     stim = None
     if stimulus_type == STIM_RADIAL:
         if HAS_RADIAL:
-            # EXACT PRD 4.1 kwargs. Do not add a mask or angularCycles.
-            stim = RadialStim(
-                win=win, tex=CHECKER_PATTERN, size=state['size'],
-                radialCycles=1, texRes=256, opacity=1,
-                contrast=state['contrast'],
-                pos=(state['x_pos'], state['y_pos']),
-                name='calib_disc', autoLog=False)
+            stim = make_radial(win, state)
         else:
             print("RadialStim unavailable -- background and fixation only.")
     elif stimulus_type in (STIM_GABOR, STIM_GRATING):
@@ -1937,6 +1975,13 @@ def main(argv=None):
                     mask_cache[0] = sd
             if stimulus_type == STIM_CUSTOM_PNG:
                 stim.opacity = state['alpha']
+            if stimulus_type == STIM_RADIAL:
+                # The setters rebuild the texture coords, so only on change.
+                radial_cycles, angular_cycles = radial_cycles_for(state)
+                if stim.radialCycles != radial_cycles:
+                    stim.radialCycles = radial_cycles
+                if stim.angularCycles != angular_cycles:
+                    stim.angularCycles = angular_cycles
 
         # ---- Draw ------------------------------------------------------------
         mode = state['mode']

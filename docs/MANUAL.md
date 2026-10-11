@@ -231,8 +231,15 @@ so the glyphs show at launch. Presets are `ABCDEF`,
 height, so the degrees on line 3 describe the letters. PsychoPy's `TextStim`
 has no letter-spacing parameter, so there is no spacing knob.
 
-**Radial checkerboard** — no extra keys. The construction is locked to the
-SSVEP standard form; use the universal contrast knob.
+**Radial checkerboard**
+
+| Param | Keys | Step | Default | Range |
+|---|---|---|---|---|
+| Rings | `Z` / `X` | ±1 | 4 | 1–20 |
+| Wedges | `R` / `T` | ±2 | 16 | 2–32, always even |
+
+Both are single-press. The defaults are pixel-identical to the original SSVEP
+construction (4x4 texture, `radialCycles=1`); see PRD 4.1.
 
 ---
 
@@ -463,7 +470,13 @@ measurements. Nothing ever reads it back; it exists for you to read.
   "custom_frequency_hz": 15,
   "visual_angle_deg": 6.43,
   "eccentricity_deg": 28.57,
-  "stimulus_specific": {}
+  "stimulus_specific": {
+    "rings": 4,
+    "wedges": 16,
+    "radialCycles": 2.0,
+    "angularCycles": 8.0,
+    "radialPhase": 0.25
+  }
 }
 ```
 
@@ -478,7 +491,7 @@ nothing you dialed in is lost to rounding.
 
 | Type | Keys in `stimulus_specific` |
 |---|---|
-| `radial_checkerboard` | *(empty)* |
+| `radial_checkerboard` | `rings`, `wedges`, `radialCycles`, `angularCycles`, `radialPhase` |
 | `gabor` | `sf`, `ori`, `phase`, `envelope_sd` |
 | `grating` | `sf`, `ori`, `phase` |
 | `uniform_patch` | `r`, `g`, `b`, `alpha` |

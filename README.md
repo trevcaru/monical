@@ -26,7 +26,7 @@ Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build st
 
 | | |
 |---|---|
-| **Radial checkerboard** — SSVEP standard, 4×4 dartboard pattern (example). | **Gabor patch** — sinusoidal carrier under a Gaussian envelope. SF, orientation, phase, envelope SD. |
+| **Radial checkerboard** — SSVEP standard dartboard. Rings and wedges adjustable; defaults (4 rings, 16 wedges) are pixel-identical to the original construction. | **Gabor patch** — sinusoidal carrier under a Gaussian envelope. SF, orientation, phase, envelope SD. |
 | ![Radial checkerboard](docs/img/radial_checkerboard.png) | ![Gabor patch](docs/img/gabor.png) |
 | **Sinusoidal grating** — the same carrier, no envelope. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha (shown: green channel isolated). |
 | ![Sinusoidal grating](docs/img/grating.png) | ![Uniform patch](docs/img/uniform.png) |
@@ -50,6 +50,7 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `F`/`J` | custom frequency ±1 Hz |
 | `;`/`'` | viewing distance ±1 cm |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
+| `Z/X` / `R/T` | radial only: rings ±1 (1–20) / wedges ±2 (2–32) |
 | `S` / `Q` | snapshot / quit and save |
 | `P` / `F12` | save preset / save screenshot PNG |
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |

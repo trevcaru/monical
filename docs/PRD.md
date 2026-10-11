@@ -117,14 +117,20 @@ Contains:
       "custom_frequency_hz": 15,
       "visual_angle_deg": 6.43,
       "eccentricity_deg": 28.57,
-      "stimulus_specific": {}
+      "stimulus_specific": {
+        "rings": 4,
+        "wedges": 16,
+        "radialCycles": 2.0,
+        "angularCycles": 8.0,
+        "radialPhase": 0.25
+      }
     }
   ],
   "final": { ... }
 }
 ```
 
-`stimulus_specific` holds per-type parameters (SF, ori, phase, SD, R, G, B, alpha — whichever apply), plus the mode-local values: `gamma_level` in gamma steps, `grid_position` and coordinates in spatial uniformity.
+`stimulus_specific` holds per-type parameters (rings and wedges with the RadialStim kwargs they derive, SF, ori, phase, SD, R, G, B, alpha — whichever apply), plus the mode-local values: `gamma_level` in gamma steps, `grid_position` and coordinates in spatial uniformity.
 
 Snapshots taken in a flicker mode also carry `flicker_frames_per_cycle` and `flicker_realized_hz`.
 
@@ -146,18 +152,29 @@ Standard SSVEP stimulus. Hard-edged circular disc, dartboard pattern.
 
 **Construction:**
 ```python
-pattern = np.ones((4, 4))
-pattern[::2, ::2] = -1
-pattern[1::2, 1::2] = -1
+pattern = np.array([[1, -1], [-1, 1]])     # one full cycle per axis
 
-RadialStim(win=win, tex=pattern, size=size, radialCycles=1,
+RadialStim(win=win, tex=pattern, size=size,
+           radialCycles=rings / 2, angularCycles=wedges / 2,
+           radialPhase=0.25,
            texRes=256, opacity=1, contrast=contrast,
            pos=(x, y), autoLog=False)
 ```
 
-No mask, no angularCycles. This matches the Odegaard Lab SSVEP experiment's v1 construction exactly.
+No mask. The 2x2 texture holds one check cycle per axis, so `rings` and `wedges` count individual checks: `radialCycles = rings / 2` and `angularCycles = wedges / 2`.
 
-**Stimulus-specific parameters:** None beyond universal. The construction is locked to the standard form. Contrast is adjustable via the universal knob.
+**Why `radialPhase=0.25`.** RadialStim's radial texture coordinate runs from `0.25 - radialPhase` at the centre to `0.25 + radialCycles - radialPhase` at the edge. That 0.25 offset was one texel on the original 4x4 texture, so v1's rings started cleanly at the centre. On a 2x2 texture it is half a texel. Left uncorrected, every ring boundary moves by half a ring width, and `rings=N` draws N+1 bands whose innermost and outermost are half-width. `radialPhase=0.25` cancels the offset, so `rings=N` draws exactly N full-width rings from the centre.
+
+**Stimulus-specific parameters:**
+
+| Param | Key | Increment | Default | Range |
+|-------|-----|-----------|---------|-------|
+| Rings | `[Z/X]` | ±1 | 4 | 1–20 |
+| Wedges | `[R/T]` | ±2 | 16 | 2–32 (always even) |
+
+Both are single-press. Contrast is adjustable via the universal knob.
+
+**Defaults reproduce v1.** The original Odegaard Lab SSVEP construction was a 4x4 texture with `radialCycles=1` and `angularCycles` left at the RadialStim default of 4 (4 rings, 16 wedges). Offscreen renders of v1 and of the default construction above (rings 4, wedges 16), on the same window, size, position, contrast and background, differ by **0 pixels**. That holds at the default size 0.225 at x=0.66 and at size 0.9 centred, on PsychoPy 2026.2.2. Ring counts 1–20 were also checked along radial rays; each draws exactly N equal-width bands.
 
 ### 4.2 Gabor patch
 
