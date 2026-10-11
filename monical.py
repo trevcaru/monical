@@ -221,7 +221,7 @@ FLASH_FRAMES = 60                 # how long the snapshot confirmation shows
 # whole number) or 'wrap' (modulo the high limit -- orientation only, where
 # 355 + 5 must land on 0 rather than sticking at 360).
 #
-# Within a pair the FIRST key listed in the PRD increases: [C/V], [F/H], [;/'],
+# Within a pair the FIRST key listed in the PRD increases: [C/V], [F/J], [;/'],
 # [Z/X], [R/T], [E/W], [D/A]. The arrows and PAGEUP/PAGEDN follow the arrow.
 #
 # PsychoPy names keys with pyglet's symbol_string() lowercased, which is where
@@ -434,20 +434,53 @@ def move_uniformity(state, key):
 
 
 def mode_claims_key(state, key):
-    """True when the active mode has taken this key off the knob table.
+    """True when the active mode has taken this arrow off the knob table.
 
     Gamma steps owns LEFT/RIGHT and spatial uniformity owns all four arrows
-    (PRD 6.2, 6.4). Those arrows are also position knobs now that X and Y
-    auto-repeat, so this has to be consulted in TWO places: the press handler
-    and the repeat loop. Without it a held arrow would drive x_pos invisibly
-    underneath a gamma or uniformity screen, and an 11-step gamma ramp would
-    blow past both ends in a fraction of a second.
+    (PRD 6.2, 6.4).
     """
     if state['mode'] == MODE_GAMMA:
         return key in ('left', 'right')
     if state['mode'] == MODE_UNIFORMITY:
         return key in ('left', 'right', 'up', 'down')
     return False
+
+
+def key_claim(state, key, sweeping=False):
+    """What the press dispatcher does with `key` BEFORE the knob table.
+
+    Returns a tag, or None when the key falls through to the knobs. This is
+    the one statement of dispatch precedence: the press loop acts on the tag,
+    and the repeat loop refuses to step any key that has one. Without that a
+    held key could drive a knob the press path would never reach -- a held
+    [A] in gamma mode silently decremented blue at the repeat rate.
+    """
+    if key in MODE_KEYS:
+        return 'mode'
+    if key == DUAL_KEY:
+        return 'dual'
+    # [A] is a knob on several types, so gamma mode claims it for the sweep.
+    if key == 'a' and state['mode'] == MODE_GAMMA:
+        return 'sweep_toggle'
+    # ESC cancels a running sweep rather than quitting.
+    if key == 'escape' and sweeping:
+        return 'sweep_cancel'
+    if mode_claims_key(state, key):
+        return 'mode_arrow'
+    if key == MENU_TOGGLE_KEY:
+        return 'menu'
+    if key == 'escape' and state['menu_visible']:
+        return 'menu_close'
+    if key == HUD_TOGGLE_KEY:
+        return 'hud'
+    if (state['stimulus_type'] == STIM_TEXT
+            and key in (TEXT_CYCLE_FWD, TEXT_CYCLE_BACK)):
+        return 'text_cycle'
+    if key == 'p':
+        return 'preset'
+    if key == 'f12':
+        return 'screenshot'
+    return None
 
 
 def rolling_stats(intervals):
@@ -535,6 +568,39 @@ def apply_knob(state, key, table):
     else:
         state[field] = round(clamp(value, low, high), STORE_DP)
     return True
+
+
+def repeat_tick(state, table, names, is_down, held_since, repeat_count, now,
+                sweeping=False):
+    """One frame of hold-to-repeat for the repeat-enabled keys in `names`.
+
+    The count due is derived from how long the key has been down, NOT from the
+    time since the last increment. Those differ: an increment can only be
+    emitted on a frame boundary, so "wait 1/rate s since the last one" rounds
+    every interval UP to a whole frame and beats the realised rate down.
+    Measuring against the hold start lets a short interval make up for a long
+    one, so the average holds at exactly REPEAT_RATE_HZ on any panel.
+    """
+    for name in names:
+        # A key the dispatcher claims ahead of the knob table is never a knob
+        # right now, held or not -- see key_claim.
+        if not is_down(name) or key_claim(state, name, sweeping) is not None:
+            held_since.pop(name, None)
+            repeat_count.pop(name, None)
+            continue
+        if name not in held_since:
+            # First frame down. The press path already applied the initial
+            # increment; just start the hold timer.
+            held_since[name] = now
+            repeat_count[name] = 0
+            continue
+        holding = now - held_since[name] - REPEAT_DELAY_S
+        if holding < 0:
+            continue
+        due = int(holding * REPEAT_RATE_HZ)
+        for _ in range(due - repeat_count.get(name, 0)):
+            apply_knob(state, name, table)
+        repeat_count[name] = due
 
 
 # =============================================================================
@@ -1716,21 +1782,24 @@ def main(argv=None):
     while running:
         # ---- Input -----------------------------------------------------------
         for key in event.getKeys():
+            # Precedence lives in key_claim, shared with the repeat loop.
+            claim = key_claim(state, key, sweep is not None)
+
             # --- Mode switching (PRD 6). Phase resets on every switch. -------
-            if key in MODE_KEYS:
+            if claim == 'mode':
                 if state['mode'] != MODE_KEYS[key]:
                     state['mode'] = MODE_KEYS[key]
                     state['frame_idx'] = 0
                 continue
-            if key == DUAL_KEY:
+            if claim == 'dual':
                 state['dual'] = not state['dual']
                 continue
 
-            # --- Auto gamma sweep (PRD 6.5). [A] is a knob on two stimulus
+            # --- Auto gamma sweep (PRD 6.5). [A] is a knob on several stimulus
             # types, so gamma mode has to claim it the way it claims the
             # arrows -- otherwise starting a sweep would also nudge the
             # envelope SD or the blue channel underneath it.
-            if state['mode'] == MODE_GAMMA and key == 'a':
+            if claim == 'sweep_toggle':
                 if sweep is None:
                     sweep = start_sweep(state, sweep_clock)
                 else:
@@ -1740,13 +1809,13 @@ def main(argv=None):
                 continue
             # ESC cancels a running sweep rather than quitting, so a mistimed
             # press cannot end the session mid-ramp.
-            if sweep is not None and key == 'escape':
+            if claim == 'sweep_cancel':
                 sweep = cancel_sweep(state, sweep)
                 flash_text, flash_frames = 'Auto gamma cancelled', FLASH_FRAMES
                 continue
 
             # --- Arrows are claimed by two modes (PRD 6.2, 6.4) -------------
-            if mode_claims_key(state, key):
+            if claim == 'mode_arrow':
                 if state['mode'] == MODE_GAMMA:
                     if sweep is not None:
                         continue      # the sweep is driving the level
@@ -1758,39 +1827,38 @@ def main(argv=None):
                     move_uniformity(state, key)
                 continue
 
-            if key == MENU_TOGGLE_KEY:
+            if claim == 'menu':
                 state['menu_visible'] = not state['menu_visible']
                 continue
-            # ESC is claimed in order: dismiss the menu, else cancel a running
-            # sweep, else quit. Quitting is the last resort so neither overlay
-            # can be closed by accidentally ending the session.
-            if key == 'escape' and state['menu_visible']:
+            # ESC is claimed in order: cancel a running sweep, else dismiss
+            # the menu, else quit. Quitting is the last resort so neither
+            # overlay can be closed by accidentally ending the session.
+            if claim == 'menu_close':
                 state['menu_visible'] = False
                 continue
 
-            if key == HUD_TOGGLE_KEY:
+            if claim == 'hud':
                 # Hides ONLY the readout. Stimulus, fixation and the gamma
                 # patch keep drawing, so a photometer reading or a screenshot
                 # is unobstructed (PRD 8.1).
                 state['hud_visible'] = not state['hud_visible']
                 continue
 
-            if (state['stimulus_type'] == STIM_TEXT
-                    and key in (TEXT_CYCLE_FWD, TEXT_CYCLE_BACK)):
+            if claim == 'text_cycle':
                 step = 1 if key == TEXT_CYCLE_FWD else -1
                 state['text_index'] = ((state['text_index'] + step)
                                        % len(text_presets))
                 state['text_string'] = text_presets[state['text_index']]
                 continue
 
-            if key == 'p':
+            if claim == 'preset':
                 path = save_preset(state, timestamp_slug())
                 flash_text = 'Preset saved: {}'.format(os.path.basename(path))
                 flash_frames = FLASH_FRAMES
                 print("PRESET saved to {}".format(path))
                 continue
 
-            if key == 'f12':
+            if claim == 'screenshot':
                 path = save_screenshot(win, timestamp_slug())
                 flash_text = 'Screenshot saved: {}'.format(
                     os.path.basename(path))
@@ -1815,42 +1883,12 @@ def main(argv=None):
         if not running:
             break
 
-        # ---- Hold-to-repeat: background gray and contrast only ---------------
-        # The count due is derived from how long the key has been down, NOT
-        # from the time since the last increment. Those differ: an increment
-        # can only be emitted on a frame boundary, so "wait 1/20 s since the
-        # last one" rounds every interval UP to a whole frame -- 50 ms becomes
-        # 3 frames sometimes and 4 others at 60 Hz, beating the realized rate
-        # down to ~17/s. Measuring against the hold start instead lets a short
-        # interval make up for a long one, so the average holds at exactly
-        # REPEAT_RATE_HZ on any panel.
+        # ---- Hold-to-repeat (PRD 5.1) ----------------------------------------
         if key_state is not None:
-            now = repeat_clock.getTime()
-            for name, symbol in repeat_symbols.items():
-                if not key_state[symbol]:
-                    held_since.pop(name, None)
-                    repeat_count.pop(name, None)
-                    continue
-                if mode_claims_key(state, name):
-                    # Gamma and uniformity own the arrows in their modes. Do
-                    # not repeat them: those are discrete steps through short
-                    # lists, and do not touch x_pos behind the mode's back.
-                    held_since.pop(name, None)
-                    repeat_count.pop(name, None)
-                    continue
-                if name not in held_since:
-                    # First frame down. event.getKeys() already applied the
-                    # initial increment above; just start the hold timer.
-                    held_since[name] = now
-                    repeat_count[name] = 0
-                    continue
-                holding = now - held_since[name] - REPEAT_DELAY_S
-                if holding < 0:
-                    continue
-                due = int(holding * REPEAT_RATE_HZ)
-                for _ in range(due - repeat_count.get(name, 0)):
-                    apply_knob(state, name, table)
-                repeat_count[name] = due
+            repeat_tick(state, table, repeat_symbols,
+                        lambda name: key_state[repeat_symbols[name]],
+                        held_since, repeat_count, repeat_clock.getTime(),
+                        sweeping=sweep is not None)
 
         # ---- Auto gamma sweep (PRD 6.5) --------------------------------------
         # Driven here rather than from the key handler so the dwell is wall
