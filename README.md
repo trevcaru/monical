@@ -18,6 +18,7 @@ pip install psychopy-visionscience
 python monical.py
 python monical.py --image assets/texture.png
 python monical.py --preset presets/preset_2026-09-18_143201.json
+python monical.py --text "MYSTRING"   # strings for the text stimulus
 python monical.py --bench     # frame-timing benchmark for this rig, fullscreen
 ```
 
@@ -33,6 +34,8 @@ Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build st
 | ![Sinusoidal grating](docs/img/grating.png) | ![Uniform patch](docs/img/uniform.png) |
 | **Custom PNG** — your own texture via `--image`, rotatable. Without it, this generated 8×8 checkerboard. | **Text / letter string** — letters and strings for legibility and acuity checks: three font families, letter spacing, rotation. Cycle with `B`/`N`, or pass `--text`. |
 | ![Custom PNG fallback](docs/img/custom_png.png) | ![Text stimulus](docs/img/text.png) |
+
+The previews are schematic renders made by [tools/generate_previews.py](tools/generate_previews.py), not screen captures. Read real parameter values off the readout.
 
 ## Modes
 
@@ -52,13 +55,13 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `;`/`'` | viewing distance ±1 cm |
 | `[`/`]` · `,`/`.` · `9`/`0` | multi-stimulus ring: copies 2–16 · rotate ±5° · select a copy (its own mode 5 frames via `F`/`J`) |
 | `/` | multi: selected copy flicker → steady → off |
-| `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
+| `Z/X` `R/T` `E/W` `D/A` | stimulus-specific: Gabor/grating SF, orientation, phase, SD (grating: waveform); uniform/text alpha, red, green, blue |
 | `Z/X` / `R/T` | radial only: rings ±1 (1–20) / wedges ±2 (2–32) |
 | `D/A` / `B` | grating only: waveform sin/sqr/saw / circular mask on-off |
 | `B` | uniform only: rect / circle |
-| `R/T` | custom PNG only: rotation ±5° |
+| `Z/X` / `R/T` | custom PNG only: alpha ±0.01 / rotation ±5° |
 | `I/O` `U/Y` `K/L` | text only: font family / letter spacing ±0.001 / rotation ±5° |
-| `S` / `Q` | snapshot / quit and save |
+| `S` / `Q` or `ESC` | snapshot / quit and save (`ESC` first cancels a running sweep or closes the menu) |
 | `P` / `F12` | save preset / save screenshot PNG |
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |
 | `H` | show/hide the readout (stimulus keeps rendering) |
@@ -84,13 +87,14 @@ The refresh figure is a rolling 120-frame average of real flip-to-flip intervals
 ```json
 {
   "note": "REFERENCE ONLY. Not loaded by any experiment. Values are read by humans and entered manually.",
-  "session_start": "2026-09-11T13:03:21",
-  "session_end": "2026-09-11T13:05:06",
+  "session_start": "2026-08-21T14:30:12",
+  "session_end": "2026-08-21T14:47:03",
   "monical_version": "0.1",
   "monitor_name": "testMonitor",
-  "monitor_resolution": [3440, 1440],
-  "monitor_width_cm": 30.0,
-  "monitor_height_cm": 12.56,
+  "monitor_resolution": [1920, 1080],
+  "monitor_width_cm": 58.67,
+  "monitor_height_cm": 33.0,
+  "monitor_dimension_warning": false,
   "color_space": "rgb",
   "units": "height",
   "window_fullscreen": true,
@@ -98,57 +102,67 @@ The refresh figure is a rolling 120-frame average of real flip-to-flip intervals
   "vsync_detail": {
     "wait_blanking": true,
     "pyglet_vsync": true,
-    "context_get_vsync": true
+    "context_get_vsync": false
   },
-  "startup_refresh_hz": 60.0,
-  "final_rolling_refresh_hz": 59.972,
-  "final_rolling_refresh_sd_ms": 0.5958,
-  "total_dropped_frames": 1,
+  "startup_refresh_hz": 239.97,
+  "final_rolling_refresh_hz": 239.94,
+  "final_rolling_refresh_sd_ms": 0.1203,
+  "total_dropped_frames": 0,
   "psychopy_version": "2026.2.2",
-  "python_version": "3.11.0 (main, Oct 24 2022, 18:26:48) [MSC v.1933 64 bit (AMD64)]",
+  "python_version": "3.11.0 ...",
   "platform": "win32",
   "has_radial_stim": true,
   "image_path": null,
+  "text_arg": null,
+  "preset_path": null,
+  "output_file": "monical_2026-08-21_143012.json",
   "viewing_distance_cm": 40.0,
   "stimulus_type": "radial_checkerboard",
   "snapshots": [
     {
       "snapshot_number": 1,
-      "timestamp": "2026-09-11T13:04:38",
-      "rolling_refresh_hz": 60.01,
+      "timestamp": "2026-08-21T14:32:01",
+      "rolling_refresh_hz": 239.94,
       "dropped_frames_total": 0,
       "stimulus_type": "radial_checkerboard",
       "mode": "static_on",
       "dual_stimulus": false,
-      "x_position": 0.14,
-      "y_position": -0.005,
-      "background_gray": 0.0,
+      "multi_active": false,
+      "multi_count": 2,
+      "ring_offset_deg": 0.0,
+      "ring_radius": 0.66,
+      "ring_center_y": 0.0,
+      "selected_index": 0,
+      "stimuli": [
+        {"index": 0, "x": 0.66, "y": 0.0, "ecc_deg": 28.57,
+         "flicker_frames": 16, "on_frames": 8, "off_frames": 8,
+         "realized_hz": 14.998, "flicker_state": "flicker",
+         "offscreen": false}
+      ],
+      "x_position": 0.66,
+      "y_position": 0.0,
+      "background_gray": 0.012,
       "disc_size": 0.225,
       "contrast": 1.0,
-      "custom_frequency_hz": 14,
-      "visual_angle_deg": 4.05,
-      "eccentricity_deg": 2.52,
-      "stimulus_specific": {}
+      "custom_frequency_hz": 14.998,
+      "visual_angle_deg": 10.61,
+      "eccentricity_deg": 28.57,
+      "stimulus_specific": {
+        "rings": 4,
+        "wedges": 16,
+        "radialCycles": 2.0,
+        "angularCycles": 8.0,
+        "radialPhase": 0.25
+      },
+      "flicker_active": false,
+      "flicker_frames": 16,
+      "flicker_on_frames": 8,
+      "flicker_off_frames": 8,
+      "flicker_realized_hz": 14.998,
+      "refresh_hz_used": 239.97
     }
   ],
-  "final": {
-    "snapshot_number": null,
-    "timestamp": "2026-09-11T13:05:06",
-    "rolling_refresh_hz": 59.972,
-    "dropped_frames_total": 1,
-    "stimulus_type": "radial_checkerboard",
-    "mode": "static_on",
-    "dual_stimulus": false,
-    "x_position": 0.74,
-    "y_position": 0.02,
-    "background_gray": 0.0,
-    "disc_size": 0.225,
-    "contrast": 1.0,
-    "custom_frequency_hz": 15,
-    "visual_angle_deg": 4.05,
-    "eccentricity_deg": 13.08,
-    "stimulus_specific": {}
-  }
+  "final": { ... }
 }
 ```
 
@@ -158,7 +172,7 @@ Nothing reads this file back. You transcribe the values into your experiment by 
 
 ## Documentation
 
-- [docs/MANUAL.md](docs/MANUAL.md) — operating manual: full keybindings, seven step-by-step calibration workflows, output reference, troubleshooting.
+- [docs/MANUAL.md](docs/MANUAL.md) — operating manual: full keybindings, nine step-by-step workflows, output reference, troubleshooting.
 - [docs/PRD.md](docs/PRD.md) — design authority: what each stimulus is, why, and the exact construction.
 - [docs/VERIFICATION.md](docs/VERIFICATION.md) — verification protocol: confirm the readout and JSON match what the display is physically doing.
 

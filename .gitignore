@@ -10,3 +10,11 @@ screenshots/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Local tool, editor and OS files.
+.env
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

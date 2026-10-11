@@ -42,21 +42,23 @@ b) Place the photodiode on the stimulus.
 c) Read the oscilloscope. Measure the period and compute frequency.
 d) Compare against the HUD's realized Hz (line 4) and the JSON's
    `flicker_realized_hz`.
-e) Repeat for mode `4` (20 Hz) and mode `5` with at least three custom values
-   (e.g. 6, 10, 30 Hz). Set the custom rate with `F` / `J` before pressing `5`.
-f) Check duty cycle, which the readout states directly. At 240 Hz all modes
-   read `50% duty`. At 60 Hz the 20 Hz mode reads `33% duty` — 1 frame on,
-   2 off — because 60/20 = 3 frames and the on-half is `frames // 2`.
-   Expected, not a bug. Compare the scope's measured duty against it.
-g) Record for each frequency: requested Hz, realized Hz from the HUD, measured
+e) Repeat for mode `4` (20 Hz) and mode `5` with at least three custom frame
+   counts (e.g. at 60 Hz: 2, 6 and 10 frames = 30, 10 and 6 Hz). `F` / `J`
+   step the count one frame at a time, in any mode.
+f) Check the on/off split, which the readout states directly. At 240 Hz modes
+   `3` and `4` read `8 on/8 off` and `6 on/6 off`. At 60 Hz the 20 Hz mode
+   reads `(3 fr, 1 on/2 off) ASYM`, because 60/20 = 3 frames and the on-half
+   is `frames // 2`. Expected, not a bug. Compare the scope's measured duty
+   against it.
+g) Record for each setting: frame count, realized Hz from the HUD, measured
    Hz from the scope. They should agree within scope measurement precision.
 h) During a clean run the HUD drop counter should read `0`. If it increments
    during measurement, the timing data for that interval is unreliable.
 
-**Read the realized value, never the requested one.** The HUD shows frames per
-cycle and duty beside it (`Freq: 15.00 Hz (16 frames, 50% duty)`). Only divisors of
-the refresh rate are exactly achievable — at 60 Hz, a requested 17 Hz lands on
-4 frames and delivers ~15 Hz.
+**Read the realized value, never a nominal one.** The HUD shows frames per
+cycle and the on/off split beside it (`Freq: 15.00 Hz (16 fr, 8 on/8 off)`).
+Only whole-frame cycles exist: at 60 Hz, mode `5` can give 30, 20, 15 or
+12 Hz (2, 3, 4 or 5 frames) but nothing in between, so there is no 17 Hz.
 
 **Pass criteria:** scope frequency matches realized Hz within ±0.1 Hz for every
 tested frequency.
@@ -99,8 +101,9 @@ gamma for this display's configuration.
 
 ## 3. Channel Independence
 
-Select **uniform patch (type 4)** at startup. The R/G/B keys exist only for
-that type — you cannot drive channels from a Gabor or checkerboard session.
+Select **uniform patch (type 4)** at startup. It is the only type that draws
+a solid colour field from the R/G/B keys. Text (type 6) has the same keys but
+colours glyphs, and the other types cannot drive channels at all.
 
 Keys: `R`/`T` = red, `E`/`W` = green, `D`/`A` = blue, all ±0.001, hold to
 scroll at ~60/s. Driving one channel the full 0 → −1 is 1000 steps, about 17
@@ -138,8 +141,9 @@ e) Michelson contrast = (L_on − L_off) / (L_on + L_off). At contrast 1.0 this
 f) Step through several contrast values (0.0, 0.25, 0.5, 0.75, 1.0), snapshot
    and measure each.
 
-Contrast steps at ±0.001 and auto-repeats — hold `V` for about 8 seconds to go
-from 1.0 to 0.5. Do not move the probe between the ON and OFF readings.
+Contrast steps at ±0.001 and auto-repeats — hold `V` for about 9 seconds (a
+1-second delay, then 500 steps at ~60/s) to go from 1.0 to 0.5. Do not move
+the probe between the ON and OFF readings.
 
 **Pass criteria:** measured contrast tracks the contrast knob monotonically.
 The exact relationship depends on whether gamma correction is active.
@@ -195,17 +199,20 @@ experiment's stimulus positions see meaningfully different luminance.
 
 ---
 
-## 7. Dual Stimulus Symmetry
+## 7. Multi-Stimulus Symmetry
 
-a) Toggle dual mode (key `7`) in static ON. Copies appear at +x and −x.
+a) Toggle multi-stimulus (key `7`) in static ON. At the default 2 copies and
+   ring offset 0, copies appear at +x and −x.
 b) Measure the luminance of both stimuli. They should match within photometer
    precision.
-c) Enter a flicker mode. Dual is a toggle, not a mode, so it stays on. Verify
-   on the oscilloscope that both stimuli flicker in sync — same phase, same
-   frequency.
+c) Enter flicker mode `3` or `4`. Multi is a toggle, not a mode, so it stays
+   on. Verify on the oscilloscope that both stimuli flicker in sync — same
+   phase, same frequency.
 
-Both copies are drawn in the same frame from the same on/off test, so any phase
-offset you measure is the display's (scanout, local dimming), not Monical's.
+In modes `3` and `4` every copy uses the same frame count and the same frame
+counter, so any phase offset you measure is the display's (scanout, local
+dimming), not Monical's. In mode `5` each copy has its own frame count
+(`9` / `0` select, `F` / `J` set), which they start out sharing.
 
 **Pass criteria:** luminance difference < 1% between the two positions. Zero
 phase offset on the scope trace.
@@ -244,9 +251,9 @@ If you don't have time for the full protocol:
    no photometer.
 2. **Flicker 15 Hz:** does it look like 15 Hz? Subjective, but catches gross
    errors.
-3. **Check `monitor_height_cm`.** If it's 12.56 or 20.0 — or if
-   `monitor_width_cm` is exactly 30.0 — it's the PsychoPy `testMonitor`
-   default and every angle is wrong.
+3. **Check `monitor_width_cm`.** If it's exactly 30.0 it's the PsychoPy
+   `testMonitor` default and every angle is wrong. The height derived from it
+   is 16.88 on a 16:9 panel and 12.56 on a 3440×1440 ultrawide.
 4. **Check `startup_refresh_hz`.** If it's exactly 60.0, `getMsPerFrame`
    probably returned the fallback; a real measurement never lands on a round
    number.

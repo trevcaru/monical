@@ -22,6 +22,7 @@ photometer, you turn the knob, you save the snapshot.
 |---|---|---|
 | PsychoPy | yes | everything |
 | NumPy | yes (ships with PsychoPy) | textures, frame statistics |
+| pyglet | yes (ships with PsychoPy) | held-key auto-repeat, font lookup |
 | `psychopy_visionscience` | no | radial checkerboard only |
 
 Install the optional plugin only if you need stimulus type `[1]`. Note the pip
@@ -65,7 +66,7 @@ every run, so nothing you measured is ever overwritten.
 
 ## 3. Startup screen
 
-White text on black. Four blocks:
+White text on black. Five blocks:
 
 1. **System info** — resolution, measured refresh rate, PsychoPy version, and
    whether `psychopy_visionscience` imported. A failure here is reported with
@@ -78,12 +79,14 @@ White text on black. Four blocks:
    [3] Sinusoidal grating (contrast/SF tuning)
    [4] Uniform patch (color/luminance calibration)
    [5] Custom PNG (your own texture)
-   [6] Text / letter string
+   [6] Text / letter string (reading/crowding)
    ```
 
 3. **Workflow tutorial** — the recommended procedure and key legend for
    whichever type is selected. It redraws as you press `1`–`6`.
-4. **`Press SPACE to begin.`**
+4. **Modes and actions** — the mode keys, the multi-stimulus ring keys,
+   `S`, `P`, `F12`, `A` and `Q`. The same for every type.
+5. **`Press SPACE to begin.`**
 
 The header also shows `Output:` — the filename this session will write to —
 and `Preset:` when one was loaded with `--preset`. Note the output name before
@@ -124,14 +127,17 @@ frame fewer) and `J` lowers it, so every press changes the realized Hz. It
 starts at the frame count nearest 15 Hz. The range runs from 2 frames
 (refresh/2, 30 Hz on a 60 Hz panel) to about 1 Hz.
 
-Arrows move the stimulus; the page keys adjust the background behind it. The
-first key of each pair increases the value. Size also accepts the numpad `+`
-and `-`.
+Arrows move the stimulus; the page keys adjust the background behind it.
+Arrows follow their direction. For the other pairs the first key increases
+the value, except `[` / `]`, where `]` adds a copy, and `F` / `J`, where `F`
+raises the rate by removing a frame. Size also accepts `=` (the unshifted `+`
+key) and the numpad `+` and `-`.
 
 **Hold to scroll.** Keys marked *hold* auto-repeat after a 1-second delay, then
-run at ~60 increments per second. On a 60 Hz panel that is one step per frame,
-which is the ceiling — expect slightly under 60/s there. On a 240 Hz panel it
-is one step every four frames.
+run at ~60 increments per second. On a 60 Hz panel that is about one step per
+frame; on a 240 Hz panel, one step every four frames. The count is kept against
+the moment the key went down, so a late frame catches up and the average holds
+at 60/s on any panel.
 
 Every other key acts **once per press**, however long you hold it. Holding `S`
 takes one snapshot, holding `A` in gamma mode starts the sweep once, and
@@ -232,8 +238,8 @@ sits where the cross would be.
 
 ### Stimulus-specific keys
 
-The same four key pairs mean different things per stimulus type. The active
-legend is always on HUD line 5.
+The same key pairs mean different things per stimulus type. HUD line 5 shows
+the active type's values, and the `M` card lists its keys.
 
 **Gabor patch**
 
@@ -445,8 +451,9 @@ The intro screen opens on the stimulus type the preset was saved from, and
 shows `Preset:` in the header so you can confirm it loaded. You can still pick
 a different type before `SPACE` — your choice at the selector wins.
 
-A preset holds the stimulus settings, not the rig: window aspect, the
-`--image` path, and the live snapshot list are excluded. Presets are
+A preset holds the stimulus settings, not the rig: window aspect and size,
+the `--image` path, the resolved font names and the live snapshot list are
+excluded. Presets are
 forward and backward compatible — missing keys fall back to defaults, and keys
 this version does not recognise are ignored with a console note. A text
 preset restores its string by name when the current `[B]`/`[N]` cycle contains
@@ -529,6 +536,27 @@ the script:
 | `%bud` | mean draw time as a share of one frame (4.17 ms at 240 Hz) |
 | `!` | dropped frames, or a draw p95 or max above 80% of the frame |
 
+The JSON has the session file's system header (§6) without `note`,
+`preset_path`, `text_arg`, `final_rolling_refresh_hz`,
+`final_rolling_refresh_sd_ms` and `total_dropped_frames`, plus:
+
+| Field | Meaning |
+|---|---|
+| `bench` | always `true` |
+| `gl` | `vendor`, `renderer`, `version` of the OpenGL context |
+| `frames_per_config`, `warmup_frames` | recorded frames (600) and unrecorded warm-up frames (30) per configuration |
+| `mode` | `flicker_15hz`, the mode every configuration runs in |
+| `frame_budget_ms` | 1000 / startup refresh |
+| `texture` | the custom PNG source: the absolute `--image` path, or `<generated 8x8 checkerboard>` |
+| `aborted` | `true` if `Q` or `ESC` stopped the run |
+| `results` | one entry per configuration, below |
+
+Each `results` entry: `stimulus_type`, `copies`, `hud`, `frames`,
+`draw_mean_ms`, `draw_p95_ms`, `draw_max_ms`, `interval_mean_ms`,
+`interval_max_ms`, `dropped_frames`, `budget_ms`, `draw_mean_pct_budget`. If
+the radial plugin is missing, the radial type has a single entry with
+`stimulus_type` and `skipped` (the reason) instead.
+
 **Any dropped frames at a given copy count mean flicker verification on that
 machine is unreliable at that N.** A dropped frame stretches one cycle, which
 is exactly the error an oscilloscope check is meant to catch, so it would read
@@ -558,6 +586,7 @@ measurements. Nothing ever reads it back; it exists for you to read.
 
 | Field | Meaning |
 |---|---|
+| `note` | the REFERENCE ONLY reminder |
 | `session_start`, `session_end` | ISO timestamps; `session_end` is null until quit |
 | `monical_version` | tool version |
 | `monitor_name` | PsychoPy Monitor used (`testMonitor`) |
@@ -595,13 +624,25 @@ measurements. Nothing ever reads it back; it exists for you to read.
   "stimulus_type": "radial_checkerboard",
   "mode": "static_on",
   "dual_stimulus": false,
+  "multi_active": false,
+  "multi_count": 2,
+  "ring_offset_deg": 0.0,
+  "ring_radius": 0.66,
+  "ring_center_y": 0.0,
+  "selected_index": 0,
+  "stimuli": [
+    {"index": 0, "x": 0.66, "y": 0.0, "ecc_deg": 28.57,
+     "flicker_frames": 16, "on_frames": 8, "off_frames": 8,
+     "realized_hz": 14.998, "flicker_state": "flicker",
+     "offscreen": false}
+  ],
   "x_position": 0.66,
   "y_position": 0.0,
   "background_gray": 0.012,
   "disc_size": 0.225,
   "contrast": 1.0,
-  "custom_frequency_hz": 15.0,
-  "visual_angle_deg": 6.43,
+  "custom_frequency_hz": 14.998,
+  "visual_angle_deg": 10.61,
   "eccentricity_deg": 28.57,
   "stimulus_specific": {
     "rings": 4,
@@ -609,9 +650,17 @@ measurements. Nothing ever reads it back; it exists for you to read.
     "radialCycles": 2.0,
     "angularCycles": 8.0,
     "radialPhase": 0.25
-  }
+  },
+  "flicker_active": false,
+  "flicker_frames": 16,
+  "flicker_on_frames": 8,
+  "flicker_off_frames": 8,
+  "flicker_realized_hz": 14.998,
+  "refresh_hz_used": 239.97
 }
 ```
+
+`snapshot_number` is `null` in `final`.
 
 `rolling_refresh_hz` and `dropped_frames_total` are the values at the moment
 of that snapshot, so you can tell whether timing was healthy when you took the
@@ -639,7 +688,15 @@ Every snapshot also carries the flicker cycle: `flicker_frames`,
 `refresh_hz_used`. These describe the active flicker mode, or mode `5`'s
 setting when none is on (`flicker_active` says which).
 `custom_frequency_hz` now holds mode `5`'s *realized* rate. Older files wrote
-`flicker_frames_per_cycle`, and only while flickering.
+`flicker_frames_per_cycle`, and only while flickering. With multi on, the
+top-level flicker fields and `custom_frequency_hz` describe the selected copy.
+
+The ring fields are written whether or not multi is on: `multi_active`,
+`multi_count`, `ring_offset_deg`, `ring_radius`, `ring_center_y`,
+`selected_index` (0-based), and `stimuli`, one entry per drawn copy with its
+position, eccentricity, flicker cycle, `flicker_state` (`flicker`, `steady`
+or `off`) and `offscreen`. With multi off, `stimuli` has one entry.
+`dual_stimulus` is `true` only with multi on at 2 copies.
 
 ### Using it in experiment code
 
@@ -688,12 +745,13 @@ measurement.
   stimulus is not on screen for the durations the HUD claims, and any
   oscilloscope reading taken now is suspect.
 
-**Line 2 — mode.** Mode name, the session's output filename, then either the stimulus type or, in the two
+**Line 2 — mode.** Mode name, then either the stimulus type or, in the two
 modes that own the screen, what that mode owns — in gamma steps
 `Level 9/11: +0.6 rgb (204 8-bit)`, in spatial uniformity
 `Cell: top_left (-0.78, 0.39)`. `MULTI 4 r 0.66 off 0` appears when `7` is on,
-with `OVERLAP` if neighbouring copies collide. Modes `3` and `4` show their
-target and realized rate, e.g. `Flicker 15 (14.40 Hz)`.
+with `OVERLAP` if neighbouring copies collide and `OFFSCREEN n` if any are cut
+off. The session's output filename comes last (`Out:`). Modes `3` and `4` show
+their target and realized rate, e.g. `Flicker 15 (14.40 Hz)`.
 
 **Line 3 — geometry.** Position in height units with the pixel coordinate
 beside it, then size and eccentricity in degrees, with size also in pixels.
@@ -711,7 +769,12 @@ evenly, so the shorter half is ON and the line ends `ASYM`:
 
 **Line 5 — stimulus-specific.** The active key legend's values. For a Gabor it
 shows the envelope SD in height units plus the PsychoPy `mask sd` it converts
-to, since those are different quantities.
+to, since those are different quantities. A line 5 wider than the screen wraps
+onto a line 6.
+
+**Ring lines.** With multi on, outside gamma steps and spatial uniformity, a
+`Ring Hz:` line lists every copy's realized rate, wrapping onto as many lines
+as it needs (§4). The readout grows upward, clear of the status bar.
 
 ### The status bar
 

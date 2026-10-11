@@ -3,7 +3,7 @@
 **Version:** 0.1 (PRD)
 **Author:** Trevor Caruso
 **License:** MIT
-**Repo:** `https://github.com/trevcaru/monical` (GitHub TBD)
+**Repo:** https://github.com/trevcaru/monical
 
 ---
 
@@ -20,6 +20,7 @@ Monical does not run experiments, collect data, or apply corrections automatical
 - **PsychoPy** (required) — stimulus rendering, frame timing, window management. Every vision science lab using Python already has this.
 - **psychopy_visionscience** (optional, guarded import) — needed only for the radial checkerboard stimulus. All other modes work without it. Failure reported on the info screen with the pip install command.
 - **NumPy** (comes with PsychoPy)
+- **pyglet** (comes with PsychoPy) — held-key state for auto-repeat, font lookup and glyph advances. The key-state import is guarded: without it only auto-repeat is lost.
 - **argparse** (stdlib) — used for the `--image`, `--preset`, `--text` and `--bench` flags only.
 - No other dependencies.
 
@@ -51,13 +52,13 @@ Benchmarking frame timing on the rig instead of running a session:
 python monical.py --bench
 ```
 
-`--bench` opens fullscreen, measures the refresh as a session would, and needs no input; `Q` or `ESC` aborts. It runs each of the six types at 1, 2, 8 and 16 copies in flicker mode 3 with the readout off, 600 recorded frames each after a 30-frame warm-up. The radial type is skipped with a note if the plugin is missing, and the PNG type uses `--image` if given, otherwise the generated pattern held in memory. It then runs every type at 1 and 16 copies with the readout on, to show what reading the readout during a flicker check costs on that machine. Each configuration records draw time (mean, p95, max), flip-to-flip interval (mean, max), dropped frames (same rule as §3.2) and the draw mean as a percentage of the frame budget. Results go to `bench_YYYY-MM-DD_HHMMSS.json` beside the script (same timestamp format as the session files), with the same system header as a session file plus the GL vendor, renderer and version. The file is rewritten after every configuration, so an aborted run keeps what finished. A console table at the end marks (`!`) any configuration that dropped frames, or whose draw p95 or max exceeded 80% of the budget. A single slow frame is enough to drop a cycle, so the mean is not the figure to judge by. The benchmark runs the same scene-building, per-frame drawing and frame-timing code as a session.
+`--bench` opens fullscreen, measures the refresh as a session would, and needs no input; `Q` or `ESC` aborts. It runs each of the six types at 1, 2, 8 and 16 copies in flicker mode 3 with the readout off, 600 recorded frames each after a 30-frame warm-up. The radial type is skipped with a note if the plugin is missing, and the PNG type uses `--image` if given, otherwise the generated pattern held in memory. It then runs every type at 1 and 16 copies with the readout on, to show what reading the readout during a flicker check costs on that machine. Each configuration records draw time (mean, p95, max), flip-to-flip interval (mean, max), dropped frames (same rule as §3.2) and the draw mean as a percentage of the frame budget. Results go to `bench_YYYY-MM-DD_HHMMSS.json` beside the script (same timestamp format as the session files). The file carries the session file's system header without `note` and the run-only fields (`preset_path`, `text_arg`, `final_rolling_refresh_hz`, `final_rolling_refresh_sd_ms`, `total_dropped_frames`), plus `bench`, `gl` (GL vendor, renderer and version), `frames_per_config`, `warmup_frames`, `mode`, `frame_budget_ms`, `texture`, `aborted` and the `results` list (fields in MANUAL §5i). The file is rewritten after every configuration, so an aborted run keeps what finished. A console table at the end marks (`!`) any configuration that dropped frames, or whose draw p95 or max exceeded 80% of the budget. A single slow frame is enough to drop a cycle, so the mean is not the figure to judge by. The benchmark runs the same scene-building, per-frame drawing and frame-timing code as a session.
 
 ### 3.1 Screen flow
 
 ```
 ┌─────────────────────┐
-│   INTRO / SELECTOR   │  Select stimulus type (1–4), see tutorial,
+│   INTRO / SELECTOR   │  Select stimulus type (1–6), see tutorial,
 │                      │  press SPACE to proceed
 └──────────┬──────────┘
            │
@@ -79,13 +80,15 @@ Contains:
 
 ```json
 {
-  "monical_version": "0.1",
+  "note": "REFERENCE ONLY. Not loaded by any experiment. Values are read by humans and entered manually.",
   "session_start": "2026-08-21T14:30:12",
   "session_end": "2026-08-21T14:47:03",
+  "monical_version": "0.1",
   "monitor_name": "testMonitor",
   "monitor_resolution": [1920, 1080],
-  "monitor_width_cm": 59.8,
-  "monitor_height_cm": 33.6,
+  "monitor_width_cm": 58.67,
+  "monitor_height_cm": 33.0,
+  "monitor_dimension_warning": false,
   "color_space": "rgb",
   "units": "height",
   "window_fullscreen": true,
@@ -99,11 +102,12 @@ Contains:
   "final_rolling_refresh_hz": 239.94,
   "final_rolling_refresh_sd_ms": 0.1203,
   "total_dropped_frames": 0,
-  "psychopy_version": "2024.2.4",
+  "psychopy_version": "2026.2.2",
   "python_version": "3.11.0 ...",
   "platform": "win32",
   "has_radial_stim": true,
   "image_path": null,
+  "text_arg": null,
   "preset_path": null,
   "output_file": "monical_2026-08-21_143012.json",
   "viewing_distance_cm": 40.0,
@@ -117,13 +121,25 @@ Contains:
       "stimulus_type": "radial_checkerboard",
       "mode": "static_on",
       "dual_stimulus": false,
+      "multi_active": false,
+      "multi_count": 2,
+      "ring_offset_deg": 0.0,
+      "ring_radius": 0.66,
+      "ring_center_y": 0.0,
+      "selected_index": 0,
+      "stimuli": [
+        {"index": 0, "x": 0.66, "y": 0.0, "ecc_deg": 28.57,
+         "flicker_frames": 16, "on_frames": 8, "off_frames": 8,
+         "realized_hz": 14.998, "flicker_state": "flicker",
+         "offscreen": false}
+      ],
       "x_position": 0.66,
-      "y_position": 0.00,
+      "y_position": 0.0,
       "background_gray": 0.012,
       "disc_size": 0.225,
-      "contrast": 1.000,
-      "custom_frequency_hz": 15.0,
-      "visual_angle_deg": 6.43,
+      "contrast": 1.0,
+      "custom_frequency_hz": 14.998,
+      "visual_angle_deg": 10.61,
       "eccentricity_deg": 28.57,
       "stimulus_specific": {
         "rings": 4,
@@ -132,17 +148,11 @@ Contains:
         "angularCycles": 8.0,
         "radialPhase": 0.25
       },
-      "multi_active": false,
-      "multi_count": 2,
-      "ring_offset_deg": 0.0,
-      "ring_radius": 0.66,
-      "ring_center_y": 0.0,
-      "stimuli": [{"index": 0, "x": 0.66, "y": 0.0, "ecc_deg": 28.57}],
       "flicker_active": false,
       "flicker_frames": 16,
       "flicker_on_frames": 8,
       "flicker_off_frames": 8,
-      "flicker_realized_hz": 15.0,
+      "flicker_realized_hz": 14.998,
       "refresh_hz_used": 239.97
     }
   ],
@@ -150,7 +160,7 @@ Contains:
 }
 ```
 
-`stimulus_specific` holds per-type parameters (rings and wedges with the RadialStim kwargs they derive, SF, ori, phase, SD, R, G, B, alpha — whichever apply), plus the mode-local values: `gamma_level` in gamma steps, `grid_position` and coordinates in spatial uniformity.
+`stimulus_specific` holds per-type parameters (rings and wedges with the RadialStim kwargs they derive, SF, ori, phase, SD, R, G, B, alpha — whichever apply), plus the mode-local values: `gamma_level` and `gamma_step_index` in gamma steps; `grid_position`, `grid_x` and `grid_y` in spatial uniformity, with `patch_r`, `patch_g`, `patch_b`, `patch_alpha` and `patch_shape` when the session type is not the uniform patch (§6.4).
 
 Every snapshot and the final record carry the flicker cycle: `flicker_frames`, `flicker_on_frames`, `flicker_off_frames`, `flicker_realized_hz` and `refresh_hz_used`. These describe the active flicker mode (3, 4 or 5) when one is on, and mode 5's standing setting otherwise; `flicker_active` says which. `refresh_hz_used` is the startup refresh measurement that every frame count is built on (§6.1). Earlier versions wrote `flicker_frames_per_cycle`, only in flicker modes.
 
@@ -196,6 +206,8 @@ No mask. The 2x2 texture holds one check cycle per axis, so `rings` and `wedges`
 
 Both are single-press. Contrast is adjustable via the universal knob.
 
+**Stimulus-specific snapshot fields:** `rings`, `wedges`, and the RadialStim kwargs they derive, `radialCycles`, `angularCycles`, `radialPhase`.
+
 **Defaults reproduce v1.** The original Odegaard Lab SSVEP construction was a 4x4 texture with `radialCycles=1` and `angularCycles` left at the RadialStim default of 4 (4 rings, 16 wedges). Offscreen renders of v1 and of the default construction above (rings 4, wedges 16), on the same window, size, position, contrast and background, differ by **0 pixels**. That holds at the default size 0.225 at x=0.66 and at size 0.9 centred, on PsychoPy 2026.2.2. Ring counts 1–20 were also checked along radial rays; each draws exactly N equal-width bands.
 
 ### 4.2 Gabor patch
@@ -206,17 +218,22 @@ Most common stimulus in attention and perception research. Sinusoidal grating wi
 ```python
 GratingStim(win=win, tex='sin', mask='gauss',
             size=size, sf=sf, ori=ori, phase=phase,
-            contrast=contrast, pos=(x, y), autoLog=False)
+            contrast=contrast, pos=(x, y),
+            maskParams={'sd': (size / 2) / envelope_sd}, autoLog=False)
 ```
+
+PsychoPy's `maskParams['sd']` is not an SD in stimulus units: it is the number of SDs between the centre and the patch edge. The envelope SD knob is in height units, so it is converted as above. At the defaults (size 0.225, SD 0.06) that is 1.875, which readout line 5 shows as `mask sd 1.88`.
 
 **Stimulus-specific parameters:**
 
 | Param | Key | Increment | Default | Range |
 |-------|-----|-----------|---------|-------|
 | Spatial frequency | `[Z/X]` | ±0.5 cycles | 4.0 | 0.5–50.0 |
-| Orientation | `[R/T]` | ±5° | 0.0 | 0–360 |
+| Orientation | `[R/T]` | ±5° | 0.0 | 0–360, wraps |
 | Phase | `[E/W]` | ±0.05 | 0.5 | 0.0–1.0 |
 | Envelope SD | `[D/A]` | ±0.01 | 0.06 | 0.01–1.0 |
+
+**Stimulus-specific snapshot fields:** `sf`, `ori`, `phase`, `envelope_sd`.
 
 ### 4.3 Sinusoidal grating
 
@@ -236,7 +253,7 @@ GratingStim(win=win, tex=waveform, mask=None if mask == 'none' else mask,
 | Param | Key | Increment | Default | Range |
 |-------|-----|-----------|---------|-------|
 | Spatial frequency | `[Z/X]` | ±0.5 cycles | 4.0 | 0.5–50.0 |
-| Orientation | `[R/T]` | ±5° | 0.0 | 0–360 |
+| Orientation | `[R/T]` | ±5° | 0.0 | 0–360, wraps |
 | Phase | `[E/W]` | ±0.05 | 0.5 | 0.0–1.0 |
 | Waveform | `[D/A]` | next / previous | `sin` | `sin`, `sqr`, `saw` (wraps) |
 | Mask | `[B]` | toggle | `none` | `none`, `circle` |
@@ -277,6 +294,8 @@ The circle is a ShapeStim fill, the same render path as the rect. It is not a ma
 | Shape | `[B]` | toggle | `rect` | `rect`, `circle` |
 
 Shape is single-press. `[N]` is unbound for this type.
+
+**Stimulus-specific snapshot fields:** `r`, `g`, `b`, `alpha`, `shape`.
 
 Note: PsychoPy color range is -1 to 1. Mid-gray = 0. Black = -1. White = 1.
 
@@ -403,7 +422,7 @@ Active in all stimulus modes.
 | Ring copies (multi) | `[ / ]` | ±1 | 2 | 2–16 |
 | Ring offset (multi) | `[, / .]` | ±5° | 0 | 0–360, wraps |
 
-Arrows move the stimulus; the page keys adjust the background behind it.
+Arrows move the stimulus; the page keys adjust the background behind it. Size also takes `=` (the unshifted `+` key) and the numpad `+` and `-`.
 
 Custom flicker is stored as a cycle length in whole frames, not Hz. `[F]` raises the rate, which means one frame *fewer*; `[J]` lowers it. Because the frame count is what changes, every press moves the realised rate. A Hz knob rounding to frames left most presses doing nothing: at 60 Hz, 106 of 119 steps of the old 1–120 Hz knob landed on an unchanged count.
 
@@ -449,7 +468,11 @@ Non-mode action keys, active throughout the test routine:
 | `[P]` | Save the current knobs as a preset (§10) |
 | `[F12]` | Save a PNG of the current frame (§11) |
 | `[A]` | Start or cancel the auto gamma sweep, gamma mode only (§6.5) |
+| `[H]` | Show or hide the readout (§8.1) |
+| `[M]` | Show or hide the keybinding card (§8.3) |
+| `[B/N]` | Text type only: cycle strings (§4.6) |
 | `[Q]` | Quit, writing final state |
+| `[ESC]` | Cancel a running sweep, else dismiss the menu, else quit (§8.3) |
 
 ### 6.1 Flicker logic
 
@@ -472,7 +495,7 @@ Full-screen uniform gray patch. 11 levels: -1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.
 
 Fixation cross is **hidden** in this mode — the photometer goes at screen center.
 
-Snapshots in this mode include `gamma_level` in `stimulus_specific`.
+Snapshots in this mode include `gamma_level` and `gamma_step_index` in `stimulus_specific`.
 
 ### 6.3 Multi-stimulus mode
 
@@ -524,7 +547,9 @@ The flicker formula is unchanged for `flicker` copies. Raising and lowering the 
 
 ### 6.4 Spatial uniformity mode
 
-Renders the uniform patch (regardless of selected stimulus type) at preset grid positions. Arrow keys step through: center, top-left, top-center, top-right, mid-left, mid-right, bottom-left, bottom-center, bottom-right. Snapshot at each position to characterize panel uniformity.
+Renders the uniform patch (regardless of selected stimulus type) at nine grid positions: center, top-left, top-center, top-right, mid-left, mid-right, bottom-left, bottom-center, bottom-right. It starts at center. The arrow keys move one cell left, right, up or down on the 3×3 grid and stop at the edges. Edge and corner cells sit as far out as the patch fits without clipping, so the coordinates depend on the size knob. The patch uses the current shape, `r`/`g`/`b`, alpha, contrast and size. Fixation is hidden. Snapshot at each position to characterize panel uniformity.
+
+Snapshots in this mode include `grid_position`, `grid_x` and `grid_y` in `stimulus_specific`, plus `patch_r`, `patch_g`, `patch_b`, `patch_alpha` and `patch_shape` when the session type is not the uniform patch.
 
 ### 6.5 Auto gamma sweep
 
@@ -571,12 +596,14 @@ Readout shows both stimulus size (degrees) and eccentricity (degrees) on screen 
 Bottom center, small monospace text, updates every frame. Adapts to the current stimulus type.
 
 ```
-Line 1: [resolution] | [refresh Hz avg] | PsychoPy [ver] | Dist: [cm] cm
-Line 2: Mode: [name] | Stim: [type] [| MULTI N r [radius] off [deg] [OVERLAP] [OFFSCREEN n]]
-Line 3: X: [val] | Y: [val] | Size: [val] ([deg]°) | Ecc: [deg]°   (multi: Ecc(#k), the selected copy)
-Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] fr, [on] on/[off] off) [ASYM]
-Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
+Line 1: [resolution] | [rolling Hz] Hz (σ=[sd]ms) | Drops: [n] | PsychoPy [ver] | Dist: [cm] cm
+Line 2: Mode: [name] | Stim: [type] [| MULTI N r [radius] off [deg] [OVERLAP] [OFFSCREEN n]] | Out: [file]
+Line 3: X: [val] ([px]px) | Y: [val] ([px]px) | Size: [val] ([px]px, [deg] deg) | Ecc: [deg] deg   (multi: Ecc(#k), the selected copy)
+Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] fr, [on] on/[off] off) [ASYM] [idle]
+Line 5: [stimulus-specific params, e.g. SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)]
 ```
+
+In gamma steps line 2 shows `Level k/11: [rgb] rgb ([8-bit] 8-bit)` in place of `Stim:`, and in spatial uniformity `Cell: [name] ([x], [y])`. Line 5 then describes the mode's keys instead of the stimulus.
 
 With multi on, the readout adds a ring line listing every copy's realised rate, with `ASYM` marks and the selected copy starred, wrapped onto as many lines as the screen width needs: `Ring Hz:  1:20.00 ASYM  2:STEADY  3*:--  4:10.00`. A steady copy shows `STEADY`, an off copy `--`, and an off-screen copy `!` after its number. The readout grows upward, so its bottom edge stays clear of the status bar. Line 4 and the status bar's `[F/J] Custom` field show the selected copy.
 
@@ -620,6 +647,7 @@ It updates live and carries:
 - `[M] Menu: ON/OFF` — whether the keybinding overlay is showing
 - `[F/J] Custom` — mode 5's realised rate, frame count and on/off split, **and the keys that adjust it**. This is the discoverability mode 5 otherwise lacks: nothing else on screen says how to change the rate it flickers at
 - the mode name
+- `SELECTED #k OFF SCREEN`, in multi mode, when the selected copy is off screen (§6.3)
 - the session output filename, truncated from the left when long
 
 The point is that even with the readout hidden, the operator can still see which toggles are on, what the custom rate is, and where the data is going.
@@ -629,7 +657,7 @@ The point is that even with the readout hidden, the operator can still see which
 `[M]` toggles a reference card listing every binding for the current stimulus type: a dark panel at about 60% of the screen, centred, at 88% opacity so **the stimulus keeps rendering and stays visible behind it**.
 
 ```
-KEYBINDINGS -- Text / letter string
+KEYBINDINGS -- Text / letter string (reading/crowding)
 
 MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position
 DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast
@@ -668,12 +696,16 @@ White text on black background.
 
 **Section 1 — System info:**
 ```
-MONICAL — Monitor Calibration Tool
-───────────────────────────────────
+MONICAL -- Monitor Calibration Tool  v0.1
+-----------------------------------------
 Monitor:    [resolution] @ [refresh Hz]
 PsychoPy:   [version]
-Plugin:     psychopy_visionscience [OK / FAILED — pip install psychopy-visionscience]
+Plugin:     psychopy_visionscience [OK / FAILED -- pip install psychopy-visionscience]
+Output:     [session filename, §3.2]
+Preset:     [preset filename, only with --preset]
 ```
+
+A yellow monitor-dimension warning (§12) appears at the bottom when it applies.
 
 **Section 2 — Stimulus selector:**
 ```
@@ -683,7 +715,7 @@ SELECT STIMULUS TYPE:
   [3] Sinusoidal grating (contrast/SF tuning)
   [4] Uniform patch (color/luminance calibration)
   [5] Custom PNG (your own texture)
-  [6] Text / letter string
+  [6] Text / letter string (reading/crowding)
 ```
 
 **Section 3 — Workflow tutorial (adapts to selection):**
@@ -697,10 +729,23 @@ Load your experiment texture, verify rendering at target
 size/position/contrast.
 ```
 
-**Section 4 — Proceed:**
+**Section 4 — Modes and actions** (the same for every type):
+```
+MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz
+       [5] custom Hz  [G] gamma steps  [8] spatial uniformity
+       [7] MULTI ring on/off  [ / ] copies 2-16  [,/.] rotate
+       [9/0] select copy -- [F/J] then sets ITS mode 5 frames
+       [/] selected copy: flicker -> steady -> off
+[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma
+[Q] quit (saves final state)
+```
+
+**Section 5 — Proceed:**
 ```
 Press SPACE to begin.
 ```
+
+`Q` or `ESC` on this screen aborts without writing a file.
 
 ---
 
@@ -716,11 +761,11 @@ A preset is a snapshot of the knobs, saved so a rig can be brought back to a kno
 python monical.py --preset presets/preset_2026-09-18_143201.json
 ```
 
-A preset carries the stimulus, not the rig or the run. These keys are excluded: `frame_idx` and `snapshots` (live loop bookkeeping), `aspect` (comes from the window), and `image_path` (comes from `--image`).
+A preset carries the stimulus, not the rig or the run. These keys are excluded: `frame_idx` and `snapshots` (live loop bookkeeping), `aspect`, `win_w` and `win_h` (come from the window), `image_path` (comes from `--image`), `font_requested` and `font_rendered` (resolved on each machine), and `text_extent` (measured each frame). `refresh_hz` is saved but only describes the rig the preset came from (below).
 
 **Compatibility is deliberate in both directions.** Keys the preset omits keep their defaults, so a preset written by an older version still loads. Keys it carries that this version no longer recognises are ignored with a console note. Neither is an error — presets outlive tool versions.
 
-**Values are sanitized on load.** Every numeric parameter is clamped to its knob range (§4, §5), whole-number knobs are rounded, orientation wraps into 0–360, and `wedges` is rounded to the nearest even number, with ties going up (7 → 8), within 2–32. Non-numeric values fall back to the default. Each correction prints one console line, for example `Preset: wedges 7 -> 8 (rounded to even, range 2-32)`.
+**Values are sanitized on load.** Every numeric parameter is clamped to its knob range (§4, §5), whole-number knobs are rounded, orientation, rotation and ring offset wrap into 0–360, and `wedges` is rounded to the nearest even number, with ties going up (7 → 8), within 2–32. Non-numeric values fall back to the default. Each correction prints one console line, for example `Preset: wedges 7 -> 8 (rounded to even, range 2-32)`.
 
 **Custom flicker in presets.** A preset stores mode 5 as `flicker_frames` together with `refresh_hz`, the refresh it was saved at. Loaded on a panel within 1% of that refresh, the frame count is used as is. Beyond 1%, the *rate* is what was dialled in, so it converts to the nearest frame count at the new refresh. A console line shows both, for example `custom flicker 16 fr (15.00 Hz) -> 4 fr (15.00 Hz)`. A preset from before frame stepping carries only `custom_freq_hz`, which converts to the nearest frame count with a console line. The saved `refresh_hz` never replaces the session's measured refresh.
 
@@ -769,7 +814,7 @@ The session JSON records `"monitor_dimension_warning": true/false`, so a reader 
 
 ## 14. Provenance
 
-Seed file: `seed tool` from the Odegaard Lab SSVEP experiment repo (`lab-ssvep-experiment`). The radial checkerboard construction, flicker logic, and JSON snapshot format originate there. Monical generalizes the tool to arbitrary stimulus types and adds color calibration, visual angle computation, spatial uniformity checking, and multi-stimulus verification.
+Seed file: `seed tool` from the Odegaard Lab SSVEP experiment repo (`lab-ssvep-experiment`). A copy is kept at this repo's root as `seed tool`. The radial checkerboard construction, flicker logic, and JSON snapshot format originate there. Monical generalizes the tool to arbitrary stimulus types and adds color calibration, visual angle computation, spatial uniformity checking, and multi-stimulus verification.
 
 ---
 
@@ -788,8 +833,8 @@ Seed file: `seed tool` from the Odegaard Lab SSVEP experiment repo (`lab-ssvep-e
 
    The first key of each pair increases or steps forward. In gamma mode `[A]` is the auto sweep on every type (§6.5).
 
-2. **Monitor physical dimensions.** Needed for visual angle. Auto-detect if possible (PsychoPy's Monitor object can store this). Fall back to manual entry on the info screen.
+2. ~~**Monitor physical dimensions.**~~ **Settled.** Read from the PsychoPy Monitor object's stored width, with height derived from the pixel aspect (§7). A missing or implausible height shows a non-blocking warning on the intro screen and is recorded as `monitor_dimension_warning` (§12). There is no manual entry on the intro screen; the fix is in PsychoPy Monitor Center (MANUAL §8).
 
 3. **Multiple monitor support.** `screen=0` hardcoded. Add a selector if labs routinely calibrate secondary displays.
 
-4. **Repo structure.** Single file for now. If features grow (presets, automated gamma fitting, report generation), split into a package.
+4. ~~**Repo structure.**~~ **Settled.** Monical stays a single self-contained file, `monical.py`: no submodules, no config files, no build step (§3). Splitting it is out of scope. Presets (§10) and the auto gamma sweep (§6.5) landed in `monical.py`.
