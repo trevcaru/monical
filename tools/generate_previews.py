@@ -19,7 +19,7 @@ previews are faithful rather than decorative:
   * gabor      sin grating multiplied by a Gaussian alpha mask
   * grating    the same sin grating with a hard square edge
   * custom     the 8x8 fallback pattern monical generates without --image
-  * text       the default 'A' (first of the A-Z cycle) in the monospaced face
+  * text       the default ABCDEF string in the monospaced face
 
 The HUD and intro text are verbatim snapshots of what monical.py prints, taken
 from build_hud() and build_intro_text(). If either of those changes, re-run
@@ -48,7 +48,7 @@ TEXT_BG = 0.0                             # intro and HUD are white on black
 # Matches monical's default for this type: text starts white (rgb 1.0), unlike
 # the uniform patch which starts at mid-gray 0.0.
 TEXT_STIM_RGB = (1.0, 1.0, 1.0)
-TEXT_STIM_STRING = 'A'           # first of the A-Z [B]/[N] cycle
+TEXT_STIM_STRING = 'ABCDEF'
 
 WIDTH_PX, HEIGHT_PX = 800, 500
 DPI = 100

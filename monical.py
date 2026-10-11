@@ -117,8 +117,10 @@ STIMULUS_LABELS = {
     STIM_TEXT: 'Text / letter string (reading/crowding)',
 }
 
-# PRD 4.6. [B]/[N] cycle a list built from --text (text_cycle). Font family
-# maps to the first installed name: Windows first, then macOS, then Linux.
+# PRD 4.6. [B]/[N] cycle TEXT_PRESETS, or a list built from --text
+# (text_cycle). Font family maps to the first installed name: Windows first,
+# then macOS, then Linux.
+TEXT_PRESETS = ['ABCDEF', 'abcdef', '123456', 'XXXXXX', 'oOoOoO']
 ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 TEXT_CYCLE_FWD = 'b'
 TEXT_CYCLE_BACK = 'n'
@@ -736,7 +738,7 @@ def default_state(stimulus_type):
         'rotation_deg': 0.0,
 
         # Text stimulus (PRD 4.6). rotation_deg above is shared with PNG.
-        'text_string': ALPHABET[0],
+        'text_string': TEXT_PRESETS[0],
         'text_index': 0,
         'letter_spacing': 0.0,
         'font_family': 'monospace',
@@ -844,12 +846,13 @@ def size_patch(patch, size):
 def text_cycle(text_arg):
     """(strings [B]/[N] cycle through, starting index) for --text (PRD 4.6).
 
-    None: A-Z. One character: its alphabet, starting there (a-z for a
-    lowercase letter; anything else is put in front of A-Z). Longer: the full
-    string, each of its characters, then the whole alphabet as one string.
+    None: the five TEXT_PRESETS. One character: its alphabet, starting there
+    (a-z for a lowercase letter; anything else is put in front of A-Z).
+    Longer: the full string, each of its characters, then the whole alphabet
+    as one string.
     """
     if not text_arg:
-        return list(ALPHABET), 0
+        return list(TEXT_PRESETS), 0
     if len(text_arg) == 1:
         letters = ALPHABET.lower() if text_arg in ALPHABET.lower() else ALPHABET
         if text_arg in letters:
@@ -1153,7 +1156,7 @@ WORKFLOWS = {
         "       [B] rect/circle   plus the universal knobs.",
     ],
     STIM_TEXT: [
-        "1. Cycle strings with [B]/[N] (A-Z, or built from --text).",
+        "1. Cycle strings with [B]/[N] (built in, or from --text).",
         "2. Adjust size for the target letter height in degrees;",
         "   readout line 3 shows degrees and pixels.",
         "3. Set text colour with [R/T], [E/W], [D/A]; step contrast",
@@ -1933,8 +1936,9 @@ def parse_args(argv=None):
         '--text', metavar='STRING', default=None,
         help='String for stimulus type [6]. One character: [B]/[N] cycle '
              'the alphabet from it. Longer: they cycle the full string, each '
-             'of its characters, then A-Z. Without it, A-Z. Monical has no '
-             'on-screen text entry (keyboard-only, no widgets).')
+             'of its characters, then A-Z. Without it, the five built-in '
+             'strings (ABCDEF ...). Monical has no on-screen text entry '
+             '(keyboard-only, no widgets).')
     parser.add_argument(
         '--preset', metavar='PATH', default=None,
         help='Preset JSON saved with [P]. Restores the knobs and preselects '

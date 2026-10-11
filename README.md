@@ -59,7 +59,7 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `P` / `F12` | save preset / save screenshot PNG |
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |
 | `H` | show/hide the readout (stimulus keeps rendering) |
-| `B`/`N` | text type only: cycle strings (A–Z, or built from `--text`) |
+| `B`/`N` | text type only: cycle strings (`ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO`, or built from `--text`) |
 | `M` | keybinding reference card for the current stimulus type |
 
 Position, background, contrast, the color channels and text letter spacing auto-repeat at ~60/s after a 1-second hold. Full table in [docs/MANUAL.md](docs/MANUAL.md#4-keybindings).

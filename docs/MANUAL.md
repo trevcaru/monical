@@ -48,8 +48,8 @@ a typo never ends the session.
 `--preset PATH` restores knob settings saved earlier with `[P]` (§5f).
 
 `--text STRING` sets what `[B]`/`[N]` cycle through for stimulus type `[6]`.
-Without it they step through `A`–`Z`. A single character cycles its alphabet,
-starting there. A longer string cycles the full string, then each of its
+Without it they cycle five built-in strings: `ABCDEF`, `abcdef`, `123456`,
+`XXXXXX`, `oOoOoO`. A single character cycles its alphabet, starting there. A longer string cycles the full string, then each of its
 characters, then the whole alphabet. There is no on-screen text entry. The raw
 value is recorded as `text_arg` in the session file.
 
@@ -237,7 +237,7 @@ shape; gamma steps (`G`) always fills the screen.
 
 | Param | Keys | Step | Default | Range | Repeat |
 |---|---|---|---|---|---|
-| String | `B` / `N` | next / previous | `A` | from `--text`, wraps | single press |
+| String | `B` / `N` | next / previous | `ABCDEF` | 5 built-in, or from `--text`; wraps | single press |
 | Font family | `I` / `O` | next / previous | monospace | monospace, sans-serif, serif | single press |
 | Letter spacing | `U` / `Y` | ±0.001 | 0.000 | −0.05–0.20 | hold |
 | Rotation | `K` / `L` | ±5° | 0 | wraps 0–360 | single press |
@@ -256,6 +256,12 @@ startup. If a font is missing, the readout says `FALLBACK` and names the face
 actually drawn. A string is laid out one glyph at a time on the font's advance
 widths, so at spacing 0 it is pixel-identical to a plain `TextStim`. Rotation
 turns the whole string as one piece about its centre.
+
+**Text never wraps here.** A plain PsychoPy `TextStim` wraps at its
+`wrapWidth`, which defaults to one screen height in `height` units. A string
+wider than that sits on one line in Monical but breaks onto several lines in
+an experiment that keeps the default. It will only match if the experiment sets
+`wrapWidth` wide enough.
 
 **Radial checkerboard**
 

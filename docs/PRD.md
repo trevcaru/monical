@@ -310,7 +310,9 @@ A string of two or more characters is drawn as **one TextStim per glyph**, each 
 
 **Layout from advance widths.** Glyph positions come from the font's advance widths, not ink bounding boxes. They are read from the same pyglet font object TextStim draws with (`pyglet.font.load(font, int(height_px * 0.75))`, then `get_glyphs()`), so no new dependency is involved. Glyph *i*'s pen position is the sum of the advances of glyphs 0..*i*−1 plus *i* × spacing. The string's full advance extent is centred on (x, y) using pyglet's own integer arithmetic for a centred line, `-(W // 2) + (W - width) // 2` with W the TextStim wrap width in px. A plain `-width / 2` puts odd widths on a half pixel, 1 px off a single TextStim.
 
-*Measured:* at spacing 0, the per-glyph layout is **pixel-identical** to a single TextStim of the same string. That held for "AHO" and "WAVE" in all three fonts at size 0.225 centred (0 differing pixels, per-glyph offset 0 px), and for "WAVE", "AHO" and "Hamburgefonts" at three other sizes and fractional positions. pyglet 1.4 applies no kerning, so the kerning-prone "WAVE" shows no pair adjustment in either rendering.
+*Measured:* at spacing 0, the per-glyph layout is **pixel-identical** to a single TextStim of the same string. That held for "AHO" and "WAVE" in all three fonts at size 0.225 centred (0 differing pixels, per-glyph offset 0 px), and for "WAVE", "AHO" and "Hamburgefonts" at three other sizes and fractional positions. pyglet 1.4 applies no kerning, so the kerning-prone "WAVE" shows no pair adjustment in either rendering. The five default strings are pixel-identical too, in all three fonts.
+
+**No wrapping.** Monical's per-glyph text never wraps. A plain PsychoPy TextStim wraps at its `wrapWidth`, which defaults to one screen height in `height` units. A string wider than that renders on one line here but on several in an experiment that leaves `wrapWidth` at its default. Measurements of such a string transfer only if the experiment sets `wrapWidth` wide enough to keep it on one line.
 
 **Rotation** turns each glyph's `ori` and also rotates its offset about the string centre (clockwise, PsychoPy's convention), so the string turns as a rigid unit. *Measured:* at 90° the ink-box centres of "AHO" lie on one vertical line (0 px spread), in reading order top to bottom.
 
@@ -343,7 +345,7 @@ The first key of each pair increases (U, K) or steps forward (I, B). Spacing is 
 
 | `--text` | `[B/N]` cycle | Starts at |
 |---|---|---|
-| absent | `A` … `Z`, single characters | `A` |
+| absent | `ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO` | `ABCDEF` |
 | one character | its alphabet, single characters (a–z for a lowercase letter; any other character is placed before A–Z) | that character |
 | two or more | the full string, then each of its characters, then `ABCDEFGHIJKLMNOPQRSTUVWXYZ` as one string | the full string |
 
