@@ -814,7 +814,7 @@ The session JSON records `"monitor_dimension_warning": true/false`, so a reader 
 
 ## 14. Provenance
 
-Seed file: `seed tool` from the Odegaard Lab SSVEP experiment repo (`lab-ssvep-experiment`). A copy is kept at this repo's root as `seed tool`. The radial checkerboard construction, flicker logic, and JSON snapshot format originate there. Monical generalizes the tool to arbitrary stimulus types and adds color calibration, visual angle computation, spatial uniformity checking, and multi-stimulus verification.
+Monical grew out of a single-stimulus photometer and oscilloscope calibration tool written for an Odegaard Lab SSVEP experiment. The radial checkerboard construction, flicker logic, and JSON snapshot format originate there. Monical generalizes the tool to arbitrary stimulus types and adds color calibration, visual angle computation, spatial uniformity checking, and multi-stimulus verification.
 
 ---
 
