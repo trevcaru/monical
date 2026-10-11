@@ -18,6 +18,7 @@ pip install psychopy-visionscience
 python monical.py
 python monical.py --image assets/texture.png
 python monical.py --preset presets/preset_2026-09-18_143201.json
+python monical.py --bench     # frame-timing benchmark for this rig, fullscreen
 ```
 
 Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build step. Each session writes its own `monical_YYYY-MM-DD_HHMMSS.json` beside the script.

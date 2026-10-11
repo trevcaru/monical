@@ -1,5 +1,6 @@
 # Per-session rig data. Reference only, regenerated every run.
 monical_*.json
+bench_*.json
 calibration_values.json
 
 # Saved knob presets and captured frames.

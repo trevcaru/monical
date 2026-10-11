@@ -28,6 +28,7 @@ import math
 import argparse
 import datetime
 import collections
+import types
 
 import numpy as np
 
@@ -88,6 +89,16 @@ OUT_STAMP_FMT = '%Y-%m-%d_%H%M%S'
 OUT_NAME_FMT = 'monical_{}.json'
 PRESET_NAME_FMT = 'preset_{}.json'
 SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
+BENCH_NAME_FMT = 'bench_{}.json'
+BENCH_STAMP_FMT = '%Y%m%d_%H%M%S'
+
+# --bench (MANUAL "Verifying frame timing on your rig"): every type at each
+# copy count, flicker mode 3, readout off; then one run with it on.
+BENCH_COUNTS = (1, 2, 8, 16)
+BENCH_FRAMES = 600
+BENCH_WARMUP = 30                 # frames run, not recorded, per config
+BENCH_HUD_RUN = ('gabor', 16)
+BENCH_BUDGET_WARN = 0.8           # flag draw means above 80% of a frame
 
 # State keys that describe the rig or the run rather than the stimulus, and so
 # are not carried in a preset. `aspect` comes from the window, `image_path`
@@ -2473,6 +2484,511 @@ def apply_preset(state, loaded, text_presets=None):
 
 
 # =============================================================================
+# SCENE, FRAME, TIMING  (shared by the session loop and --bench)
+# =============================================================================
+
+def measure_refresh(win):
+    """Refresh in Hz from getMsPerFrame's median, or 60.0 with a warning.
+
+    getMsPerFrame returns (mean, std, median) in ms. Median is the robust one
+    -- a single scheduler stall inflates the mean by most of a frame.
+    """
+    try:
+        _mean_ms, _std_ms, median_ms = win.getMsPerFrame(nFrames=120)
+        if median_ms and median_ms > 0:
+            return 1000.0 / float(median_ms)
+    except Exception as err:                                 # noqa: BLE001
+        print("Refresh measurement failed ({}).".format(err))
+    print("WARNING: could not measure refresh rate; assuming 60.00 Hz. "
+          "Frame-count frequencies will NOT be the stated values.")
+    return 60.0
+
+
+def build_scene(win, state, image, verbose=True):
+    """Every visual object one session draws, built once (PRD 4, 6, 8)."""
+    scene = types.SimpleNamespace(stim=None, fonts=None, uniform_patches=None)
+    stimulus_type = state['stimulus_type']
+    if stimulus_type == STIM_RADIAL:
+        if HAS_RADIAL:
+            scene.stim = make_radial(win, state)
+        elif verbose:
+            print("RadialStim unavailable -- background and fixation only.")
+    elif stimulus_type in (STIM_GABOR, STIM_GRATING):
+        is_gabor = stimulus_type == STIM_GABOR
+        scene.stim = visual.GratingStim(
+            win=win, tex='sin' if is_gabor else state['waveform'],
+            mask='gauss' if is_gabor else grating_mask(state),
+            size=state['size'], sf=state['sf'], ori=state['ori'],
+            phase=state['phase'], contrast=state['contrast'],
+            pos=(state['x_pos'], state['y_pos']),
+            maskParams=({'sd': gauss_sd_param(state['size'],
+                                              state['envelope_sd'])}
+                        if is_gabor else None),
+            autoLog=False)
+    elif stimulus_type == STIM_TEXT:
+        # PRD 4.6. height is the universal size knob, so the letter height is
+        # the thing the degree readout describes. Fonts are resolved once:
+        # what each family will actually render on this machine.
+        scene.fonts = {family: resolve_font(family)
+                       for family in CHOICES['font_family']}
+        for family, (requested, rendered) in scene.fonts.items():
+            if verbose:
+                print("Font {}: {}{}".format(
+                    family, rendered, '' if rendered == requested else
+                    ' (FALLBACK -- {} not installed)'.format(requested)))
+        scene.stim = GlyphString(win)
+    elif stimulus_type == STIM_UNIFORM:
+        # Both shapes exist from the start; [B] only changes which is drawn.
+        scene.uniform_patches = {shape: make_patch(win, state, shape)
+                                 for shape in CHOICES['shape']}
+        scene.stim = scene.uniform_patches[state['shape']]
+    elif stimulus_type == STIM_CUSTOM_PNG:
+        scene.stim = visual.ImageStim(
+            win=win, image=image, size=state['size'],
+            ori=state['rotation_deg'],
+            contrast=state['contrast'], opacity=state['alpha'],
+            pos=(state['x_pos'], state['y_pos']), autoLog=False)
+
+    scene.fixation = visual.ShapeStim(
+        win=win, name='fixation_cross', vertices='cross',
+        size=FIXATION_SIZE, ori=0.0, pos=(0.0, 0.0), anchor='center',
+        lineWidth=1.0, colorSpace='rgb', lineColor='white',
+        fillColor='white', depth=0.0, interpolate=True, autoLog=False)
+
+    # Full-screen patch for gamma stepping (PRD 6.2). Width is the aspect
+    # ratio because in height units the screen is 1.0 tall and aspect wide.
+    scene.gamma_patch = visual.Rect(
+        win=win, width=state['aspect'], height=1.0, pos=(0, 0),
+        lineWidth=0, lineColor=None,
+        fillColor=[GAMMA_LEVELS[state['gamma_step_index']]] * 3,
+        colorSpace='rgb', autoLog=False)
+
+    # PRD 6.4 renders the uniform patch regardless of the selected type, so
+    # these exist even when the session is running a Gabor. It takes the
+    # current shape; gamma steps above stays a full-screen rect regardless.
+    scene.uniformity_patches = {shape: make_patch(win, state, shape)
+                                for shape in CHOICES['shape']}
+
+    scene.marker = visual.ShapeStim(
+        win=win, vertices=[(0, 0), (0, MARKER_LEN)], closeShape=False,
+        lineWidth=2, lineColor=MARKER_COLOR, colorSpace='rgb',
+        fillColor=None, interpolate=False, autoLog=False)
+
+    scene.hud = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=HUD_HEIGHT, color='white',
+        pos=(0, HUD_POS_Y), wrapWidth=HUD_WRAP_W, alignText='center',
+        anchorHoriz='center', autoLog=False)
+
+    # PRD 8.2: always drawn, dimmer and smaller than the HUD so the two do
+    # not read as one block.
+    scene.status = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=STATUS_HEIGHT,
+        color=STATUS_COLOR, pos=STATUS_POS, wrapWidth=1.9,
+        alignText='center', anchorHoriz='center', autoLog=False)
+
+    # PRD 8.3: semi-transparent panel so the stimulus stays visible behind.
+    scene.menu_box = visual.Rect(
+        win=win, width=state['aspect'] * MENU_BOX_W_FRAC,
+        height=MENU_BOX_H_FRAC, pos=(0, 0), lineWidth=0, lineColor=None,
+        fillColor=[-0.85, -0.85, -0.85], colorSpace='rgb',
+        opacity=MENU_BOX_OPACITY, autoLog=False)
+    # Anchored to the panel's left inner edge, not to screen centre: with
+    # anchorHoriz='center' PsychoPy centres a box of width wrapWidth on pos,
+    # so a wrapWidth wider than the screen pushes the first column off the
+    # left edge entirely.
+    menu_w = state['aspect'] * MENU_BOX_W_FRAC
+    scene.menu_text = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=MENU_HEIGHT, color='white',
+        pos=(-menu_w / 2.0 + MENU_PAD, 0), wrapWidth=menu_w - 2 * MENU_PAD,
+        alignText='left', anchorHoriz='left', autoLog=False)
+
+    scene.flash = visual.TextStim(
+        win, text='', font=READOUT_FONT, height=0.030, color='yellow',
+        pos=(0, 0.42), alignText='center', anchorHoriz='center',
+        autoLog=False)
+
+    # Rebuilding the Gaussian mask uploads a 256x256 texture, so it happens
+    # only when the SD or the size it is relative to actually changes.
+    scene.mask_sd = None
+    # Same for the grating's waveform and mask: what the stim was built with.
+    scene.grating_built = {'tex': state['waveform'], 'mask': state['mask']}
+    # What the readout last showed of the timing figures, and when.
+    scene.hud_clock = core.Clock()
+    scene.hud_timing = {'at': -1.0, 'hz': None, 'sd': None, 'drops': 0}
+    return scene
+
+
+def apply_live_params(win, scene, state):
+    """Push the current knobs into the stimulus objects (every frame)."""
+    win.color = [state['bg_gray']] * 3
+    stimulus_type = state['stimulus_type']
+    if stimulus_type == STIM_UNIFORM:
+        scene.stim = scene.uniform_patches[state['shape']]
+    stim = scene.stim
+    if stim is None:
+        return
+    stim.pos = (state['x_pos'], state['y_pos'])
+    stim.contrast = state['contrast']
+    if stimulus_type == STIM_UNIFORM:
+        size_patch(stim, state['size'])
+        stim.fillColor = [state['r'], state['g'], state['b']]
+        stim.opacity = state['alpha']
+    elif stimulus_type == STIM_TEXT:
+        family = state['font_family']
+        state['font_requested'], state['font_rendered'] = scene.fonts[family]
+        stim.update(state)
+        state['text_extent'] = stim.extent()
+    else:
+        stim.size = state['size']
+    if stimulus_type in (STIM_GABOR, STIM_GRATING):
+        stim.sf = state['sf']
+        stim.ori = state['ori']
+        stim.phase = state['phase']
+    if stimulus_type == STIM_GABOR:
+        sd = round(gauss_sd_param(state['size'], state['envelope_sd']), 6)
+        if sd != scene.mask_sd:
+            # Assigning maskParams re-runs the mask setter, which rebuilds
+            # the texture -- so only do it when sd moves.
+            stim.maskParams = {'sd': sd}
+            scene.mask_sd = sd
+    if stimulus_type == STIM_GRATING:
+        # tex and mask setters rebuild textures, so only on change.
+        built = scene.grating_built
+        if state['waveform'] != built['tex']:
+            stim.tex = built['tex'] = state['waveform']
+        if state['mask'] != built['mask']:
+            stim.mask = grating_mask(state)
+            built['mask'] = state['mask']
+    if stimulus_type == STIM_CUSTOM_PNG:
+        stim.opacity = state['alpha']
+        stim.ori = state['rotation_deg']
+    if stimulus_type == STIM_RADIAL:
+        # The setters rebuild the texture coords, so only on change.
+        radial_cycles, angular_cycles = radial_cycles_for(state)
+        if stim.radialCycles != radial_cycles:
+            stim.radialCycles = radial_cycles
+        if stim.angularCycles != angular_cycles:
+            stim.angularCycles = angular_cycles
+
+
+def render_frame(win, scene, state, refresh_hz, resolution, screen_height_cm,
+                 timer, sweep=None, out_name='', flash_text=None):
+    """Everything drawn in one frame, up to (not including) the flip."""
+    apply_live_params(win, scene, state)
+    mode = state['mode']
+    stim = scene.stim
+
+    if mode == MODE_GAMMA:
+        scene.gamma_patch.width = state['aspect']
+        scene.gamma_patch.fillColor = [
+            GAMMA_LEVELS[state['gamma_step_index']]] * 3
+        scene.gamma_patch.draw()
+    elif mode == MODE_UNIFORMITY:
+        name = UNIFORMITY_GRID[state['uniformity_grid_index']]
+        patch = scene.uniformity_patches[state['shape']]
+        size_patch(patch, state['size'])
+        patch.pos = uniformity_xy(name, state['aspect'], state['size'])
+        patch.fillColor = [state['r'], state['g'], state['b']]
+        patch.opacity = state['alpha']
+        patch.contrast = state['contrast']
+        patch.draw()
+    elif mode == MODE_STATIC_OFF:
+        pass                      # background + fixation only (PRD 6)
+    elif stim is not None:
+        # static_on, or each copy's ON half of its own flicker cycle
+        # (PRD 6.1, 6.3).
+        for pos in drawn_positions(state, refresh_hz):
+            stim.pos = pos
+            stim.draw()
+        stim.pos = (state['x_pos'], state['y_pos'])
+
+    # Fixation cross in every mode EXCEPT the two measured ones. In gamma
+    # steps (PRD 6.2) the photometer sits at screen centre; in spatial
+    # uniformity it sits on the patch, which passes through centre at the
+    # middle cell. Either way a cross under the aperture would corrupt the
+    # reading, and the gamma curve is what everything else depends on.
+    if mode not in FIXATION_HIDDEN_MODES:
+        scene.fixation.draw()
+
+    # The selection tick goes with the readout: [H] hides both, so a
+    # photometer or screenshot frame never carries it (PRD 6.3).
+    if (state['hud_visible'] and state['multi'] and
+            mode not in (MODE_GAMMA, MODE_UNIFORMITY)):
+        segment = marker_segment(state, footprint_radius(state))
+        if segment is not None:
+            scene.marker.vertices = list(segment)
+            scene.marker.draw()
+
+    if state['hud_visible']:
+        # Timing figures refresh on the clock (HUD_TIMING_INTERVAL_S); the
+        # strings are rebuilt every frame, but set_text re-lays out only when
+        # one differs, so a knob change shows on the next frame.
+        shown = scene.hud_timing
+        now = scene.hud_clock.getTime()
+        if now - shown['at'] >= HUD_TIMING_INTERVAL_S:
+            shown.update(at=now, hz=timer.rolling_hz, sd=timer.rolling_sd_ms,
+                         drops=timer.dropped)
+        set_text(scene.hud, build_hud(
+            state, resolution, refresh_hz, shown['hz'], screen_height_cm,
+            sd_ms=shown['sd'], drops=shown['drops'], sweep=sweep,
+            out_name=out_name))
+        extra = scene.hud.text.count('\n') - 4
+        scene.hud.pos = (0, HUD_POS_Y + max(0, extra) * HUD_LINE_PITCH / 2.0)
+        scene.hud.draw()
+
+    # Always drawn, whatever [H] says (PRD 8.2).
+    set_text(scene.status, build_status_bar(state, out_name))
+    scene.status.draw()
+
+    if state['menu_visible']:
+        scene.menu_box.width = state['aspect'] * MENU_BOX_W_FRAC
+        scene.menu_box.draw()
+        scene.menu_text.pos = (-scene.menu_box.width / 2.0 + MENU_PAD, 0)
+        set_text(scene.menu_text, build_menu_text(state))
+        scene.menu_text.draw()
+
+    if flash_text is not None:
+        set_text(scene.flash, flash_text)
+        scene.flash.draw()
+
+
+class FrameTimer(object):
+    """Rolling refresh and dropped-frame count, measured at the flip.
+
+    Call tick() right after every flip. A frame counts as dropped when its
+    flip-to-flip interval exceeds DROP_FACTOR x the rolling median BEFORE it
+    joins the window, so a long frame cannot raise the bar it has to clear.
+    """
+
+    def __init__(self, refresh_hz):
+        self.refresh_hz = refresh_hz
+        self.clock = core.Clock()
+        self.intervals = collections.deque(maxlen=ROLLING_FRAMES)
+        self.startup_threshold = DROP_FACTOR / refresh_hz
+        self.dropped = 0
+        self.flips = 0
+        self.rolling_hz, self.rolling_sd_ms = refresh_hz, None
+        self.divergence_warned = False
+
+    def tick(self):
+        """Interval since the last flip in seconds, or None for the first.
+
+        The first interval spans setup (window, intro screen), so it is
+        discarded rather than counted as a drop.
+        """
+        interval = self.clock.getTime()
+        self.clock.reset()
+        self.flips += 1
+        if self.flips == 1:
+            return None
+        hz, sd_ms, median_s = rolling_stats(self.intervals)
+        if median_s is not None and len(self.intervals) >= MIN_DROP_SAMPLES:
+            threshold = DROP_FACTOR * median_s
+        else:
+            threshold = self.startup_threshold
+        if interval > threshold:
+            self.dropped += 1
+        self.intervals.append(interval)
+        hz, sd_ms, _median = rolling_stats(self.intervals)
+        if hz is not None:
+            self.rolling_hz, self.rolling_sd_ms = hz, sd_ms
+            # Once only: a full window that disagrees with getMsPerFrame
+            # means one of the two is wrong, and the frame counts driving
+            # every flicker frequency are built on the startup figure.
+            if (not self.divergence_warned
+                    and len(self.intervals) >= ROLLING_FRAMES
+                    and abs(self.rolling_hz - self.refresh_hz)
+                    > DIVERGENCE_WARN_HZ):
+                self.divergence_warned = True
+                print("WARNING: rolling refresh ({:.1f} Hz) diverges from "
+                      "startup measurement ({:.1f} Hz) -- timing may be "
+                      "unreliable".format(self.rolling_hz, self.refresh_hz))
+        return interval
+
+
+# =============================================================================
+# BENCHMARK  (--bench)
+# =============================================================================
+
+def gl_renderer():
+    """{vendor, renderer, version} of the GL context, or {} if unavailable."""
+    try:
+        from pyglet.gl import gl_info
+        return {'vendor': gl_info.get_vendor(),
+                'renderer': gl_info.get_renderer(),
+                'version': gl_info.get_version()}
+    except Exception:                                        # noqa: BLE001
+        return {}
+
+
+def bench_state(stimulus_type, count, hud, refresh_hz, resolution,
+                image_label):
+    """A default session in flicker mode 3 with `count` copies."""
+    state = default_state(stimulus_type, refresh_hz)
+    state.update(image_path=image_label,
+                 aspect=resolution[0] / float(resolution[1]),
+                 win_w=resolution[0], win_h=resolution[1],
+                 mode=MODE_FLICKER_15, hud_visible=hud,
+                 multi=count > 1, multi_count=max(MULTI_MIN, count))
+    sync_stim_frames(state)
+    return state
+
+
+def bench_config(win, state, image, refresh_hz, resolution,
+                 screen_height_cm):
+    """Run one configuration. Returns its result dict, or None on abort."""
+    scene = build_scene(win, state, image, verbose=False)
+    timer = FrameTimer(refresh_hz)
+    clock = core.Clock()
+    draws, intervals = [], []
+    dropped_before = None
+    for frame in range(BENCH_WARMUP + BENCH_FRAMES):
+        if event.getKeys(keyList=['q', 'escape']):
+            return None
+        start = clock.getTime()
+        render_frame(win, scene, state, refresh_hz, resolution,
+                     screen_height_cm, timer)
+        draw = clock.getTime() - start
+        win.flip()
+        state['frame_idx'] += 1
+        interval = timer.tick()
+        if frame == BENCH_WARMUP:
+            dropped_before = timer.dropped
+        if frame >= BENCH_WARMUP:
+            draws.append(draw)
+            if interval is not None:
+                intervals.append(interval)
+    draws.sort()
+    budget_ms = 1000.0 / refresh_hz
+    draw_mean = 1000 * sum(draws) / len(draws)
+    return {
+        'stimulus_type': state['stimulus_type'],
+        'copies': len(ring_positions(state)),
+        'hud': state['hud_visible'],
+        'frames': len(draws),
+        'draw_mean_ms': round(draw_mean, 3),
+        'draw_p95_ms': round(1000 * draws[int(0.95 * len(draws))], 3),
+        'draw_max_ms': round(1000 * draws[-1], 3),
+        'interval_mean_ms': round(1000 * sum(intervals) / len(intervals), 3),
+        'interval_max_ms': round(1000 * max(intervals), 3),
+        'dropped_frames': timer.dropped - dropped_before,
+        'budget_ms': round(budget_ms, 3),
+        'draw_mean_pct_budget': round(100 * draw_mean / budget_ms, 1),
+    }
+
+
+def bench_flagged(result):
+    return (result['dropped_frames'] > 0 or
+            result['draw_mean_ms'] > BENCH_BUDGET_WARN * result['budget_ms'])
+
+
+def bench_table(results):
+    lines = ['{:20} {:>3} {:>4} {:>8} {:>8} {:>8} {:>9} {:>9} {:>6} {:>6}'
+             .format('type', 'N', 'hud', 'draw ms', 'p95', 'max', 'intv ms',
+                     'intv max', 'drops', '%bud'),
+             '-' * 92]
+    for r in results:
+        if 'skipped' in r:
+            lines.append('{:20}  skipped: {}'.format(r['stimulus_type'],
+                                                     r['skipped']))
+            continue
+        lines.append('{:20} {:>3} {:>4} {:>8.2f} {:>8.2f} {:>8.2f} {:>9.2f} '
+                     '{:>9.2f} {:>6} {:>5.0f}% {}'.format(
+                         r['stimulus_type'], r['copies'],
+                         'on' if r['hud'] else 'off', r['draw_mean_ms'],
+                         r['draw_p95_ms'], r['draw_max_ms'],
+                         r['interval_mean_ms'], r['interval_max_ms'],
+                         r['dropped_frames'], r['draw_mean_pct_budget'],
+                         '!' if bench_flagged(r) else ''))
+    return '\n'.join(lines)
+
+
+def run_bench(args):
+    """--bench: time every type at each copy count, write bench_*.json.
+
+    Fullscreen and non-interactive; Q or ESC aborts, and whatever finished is
+    still written (the file is rewritten after every configuration).
+    """
+    image, image_label = resolve_image(args.image)
+    started = datetime.datetime.now()
+    out_path = unique_path(os.path.join(
+        OUT_DIR, BENCH_NAME_FMT.format(started.strftime(BENCH_STAMP_FMT))))
+    mon = monitors.Monitor(MONITOR_NAME)
+    win = visual.Window(
+        size=REQUESTED_RESOLUTION, fullscr=True, screen=SCREEN_INDEX,
+        monitor=mon, winType='pyglet', units=UNITS,
+        color=[DEFAULT_BG] * 3, colorSpace='rgb',
+        useFBO=True, allowStencil=False)
+    win.mouseVisible = False
+    resolution = (int(win.size[0]), int(win.size[1]))
+    screen_height_cm = monitor_height_cm(mon, resolution)
+    refresh_hz = measure_refresh(win)
+
+    header = session_header(win, mon, resolution, screen_height_cm,
+                            refresh_hz, args.image, started=started,
+                            out_path=out_path)
+    # Session-run fields (presets, final rolling rate, drop total) mean
+    # nothing here; drops are per configuration in the results.
+    for key in ('preset_path', 'text_arg', 'final_rolling_refresh_hz',
+                'final_rolling_refresh_sd_ms', 'total_dropped_frames'):
+        header.pop(key, None)
+    header.update(bench=True, gl=gl_renderer(), frames_per_config=BENCH_FRAMES,
+                  warmup_frames=BENCH_WARMUP, mode=MODE_FLICKER_15,
+                  frame_budget_ms=round(1000.0 / refresh_hz, 3),
+                  texture=image_label)
+    payload = dict(header, aborted=False, results=[])
+    configs = [(t, n, False) for t in STIMULUS_TYPES for n in BENCH_COUNTS]
+    configs.append(BENCH_HUD_RUN + (True,))
+    print("Benchmark: {} configurations x {} frames at {:.2f} Hz "
+          "(budget {:.2f} ms). Q or ESC aborts.".format(
+              len(configs), BENCH_FRAMES, refresh_hz, 1000.0 / refresh_hz))
+
+    for stimulus_type, count, hud in configs:
+        if stimulus_type == STIM_RADIAL and not HAS_RADIAL:
+            if count == BENCH_COUNTS[0]:
+                payload['results'].append({
+                    'stimulus_type': stimulus_type,
+                    'skipped': 'psychopy_visionscience missing ({})'.format(
+                        RADIAL_ERR)})
+            continue
+        state = bench_state(stimulus_type, count, hud, refresh_hz,
+                            resolution, image_label)
+        result = bench_config(win, state, image, refresh_hz, resolution,
+                              screen_height_cm)
+        if result is None:
+            payload['aborted'] = True
+            break
+        payload['results'].append(result)
+        payload['session_end'] = datetime.datetime.now().isoformat(
+            timespec='seconds')
+        write_bench(payload, out_path)
+        print("  {:20} N={:2} hud={:3} draw {:6.2f} ms ({:5.1f}%) drops {}"
+              .format(stimulus_type, result['copies'],
+                      'on' if hud else 'off', result['draw_mean_ms'],
+                      result['draw_mean_pct_budget'],
+                      result['dropped_frames']))
+
+    payload['session_end'] = datetime.datetime.now().isoformat(
+        timespec='seconds')
+    write_bench(payload, out_path)
+    win.close()
+    print("")
+    print(bench_table(payload['results']))
+    print("! = dropped frames, or draw mean above {:.0f}% of the {:.2f} ms "
+          "frame budget.".format(100 * BENCH_BUDGET_WARN,
+                                 1000.0 / refresh_hz))
+    if payload['aborted']:
+        print("ABORTED -- partial results.")
+    print("Benchmark written to {}".format(out_path))
+    core.quit()
+
+
+def write_bench(payload, path):
+    with open(path, 'w') as handle:
+        json.dump(payload, handle, indent=2)
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -2492,6 +3008,12 @@ def parse_args(argv=None):
              'strings (ABCDEF ...). Monical has no on-screen text entry '
              '(keyboard-only, no widgets).')
     parser.add_argument(
+        '--bench', action='store_true',
+        help='Benchmark frame timing instead of running a session: every '
+             'stimulus type at 1, 2, 8 and 16 copies, flicker mode 3, '
+             'fullscreen, 600 frames each. Writes bench_YYYYMMDD_HHMMSS.json '
+             'and prints a table. Q or ESC aborts.')
+    parser.add_argument(
         '--preset', metavar='PATH', default=None,
         help='Preset JSON saved with [P]. Restores the knobs and preselects '
              'the stimulus type it was saved from.')
@@ -2500,6 +3022,9 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    if args.bench:
+        run_bench(args)
+        return
     image, image_label = resolve_image(args.image)
 
     # Fixed once, before anything can write: session_start, the output
@@ -2524,20 +3049,7 @@ def main(argv=None):
     resolution = (int(win.size[0]), int(win.size[1]))
     screen_height_cm = monitor_height_cm(mon, resolution)
 
-    # getMsPerFrame returns (mean, std, median) in ms. Median is the robust
-    # one -- a single scheduler stall inflates the mean by most of a frame.
-    measured_refresh = None
-    try:
-        _mean_ms, _std_ms, median_ms = win.getMsPerFrame(nFrames=120)
-        if median_ms and median_ms > 0:
-            measured_refresh = 1000.0 / float(median_ms)
-    except Exception as err:                                 # noqa: BLE001
-        print("Refresh measurement failed ({}).".format(err))
-
-    if measured_refresh is None:
-        measured_refresh = 60.0
-        print("WARNING: could not measure refresh rate; assuming 60.00 Hz. "
-              "Frame-count frequencies will NOT be the stated values.")
+    measured_refresh = measure_refresh(win)
 
     if monitor_dimension_suspect(screen_height_cm):
         print(monitor_warning_text(screen_height_cm))
@@ -2573,106 +3085,8 @@ def main(argv=None):
                                                        len(applied)))
     table = knob_table(state['stimulus_type'], measured_refresh)
 
-    # ---- Stimuli (PRD 4) -----------------------------------------------------
-    stim = None
-    if stimulus_type == STIM_RADIAL:
-        if HAS_RADIAL:
-            stim = make_radial(win, state)
-        else:
-            print("RadialStim unavailable -- background and fixation only.")
-    elif stimulus_type in (STIM_GABOR, STIM_GRATING):
-        is_gabor = stimulus_type == STIM_GABOR
-        stim = visual.GratingStim(
-            win=win, tex='sin' if is_gabor else state['waveform'],
-            mask='gauss' if is_gabor else grating_mask(state),
-            size=state['size'], sf=state['sf'], ori=state['ori'],
-            phase=state['phase'], contrast=state['contrast'],
-            pos=(state['x_pos'], state['y_pos']),
-            maskParams=({'sd': gauss_sd_param(state['size'],
-                                              state['envelope_sd'])}
-                        if is_gabor else None),
-            autoLog=False)
-    elif stimulus_type == STIM_TEXT:
-        # PRD 4.6. height is the universal size knob, so the letter height is
-        # the thing the degree readout describes. Fonts are resolved once:
-        # what each family will actually render on this machine.
-        fonts = {family: resolve_font(family)
-                 for family in CHOICES['font_family']}
-        for family, (requested, rendered) in fonts.items():
-            print("Font {}: {}{}".format(
-                family, rendered, '' if rendered == requested else
-                ' (FALLBACK -- {} not installed)'.format(requested)))
-        stim = GlyphString(win)
-    elif stimulus_type == STIM_UNIFORM:
-        # Both shapes exist from the start; [B] only changes which is drawn.
-        uniform_patches = {shape: make_patch(win, state, shape)
-                           for shape in CHOICES['shape']}
-        stim = uniform_patches[state['shape']]
-    elif stimulus_type == STIM_CUSTOM_PNG:
-        stim = visual.ImageStim(
-            win=win, image=image, size=state['size'],
-            ori=state['rotation_deg'],
-            contrast=state['contrast'], opacity=state['alpha'],
-            pos=(state['x_pos'], state['y_pos']), autoLog=False)
-
-    fixation = visual.ShapeStim(
-        win=win, name='fixation_cross', vertices='cross',
-        size=FIXATION_SIZE, ori=0.0, pos=(0.0, 0.0), anchor='center',
-        lineWidth=1.0, colorSpace='rgb', lineColor='white',
-        fillColor='white', depth=0.0, interpolate=True, autoLog=False)
-
-    # Full-screen patch for gamma stepping (PRD 6.2). Width is the aspect
-    # ratio because in height units the screen is 1.0 tall and aspect wide.
-    gamma_patch = visual.Rect(
-        win=win, width=state['aspect'], height=1.0, pos=(0, 0),
-        lineWidth=0, lineColor=None,
-        fillColor=[GAMMA_LEVELS[state['gamma_step_index']]] * 3,
-        colorSpace='rgb', autoLog=False)
-
-    # PRD 6.4 renders the uniform patch regardless of the selected type, so
-    # these exist even when the session is running a Gabor. It takes the
-    # current shape; gamma steps above stays a full-screen rect regardless.
-    uniformity_patches = {shape: make_patch(win, state, shape)
-                          for shape in CHOICES['shape']}
-
-    marker = visual.ShapeStim(
-        win=win, vertices=[(0, 0), (0, MARKER_LEN)], closeShape=False,
-        lineWidth=2, lineColor=MARKER_COLOR, colorSpace='rgb',
-        fillColor=None, interpolate=False, autoLog=False)
-
-    hud = visual.TextStim(
-        win, text='', font=READOUT_FONT, height=HUD_HEIGHT, color='white',
-        pos=(0, HUD_POS_Y), wrapWidth=HUD_WRAP_W, alignText='center',
-        anchorHoriz='center', autoLog=False)
-
-    # PRD 8.2: always drawn, dimmer and smaller than the HUD so the two do
-    # not read as one block.
-    status = visual.TextStim(
-        win, text='', font=READOUT_FONT, height=STATUS_HEIGHT,
-        color=STATUS_COLOR, pos=STATUS_POS, wrapWidth=1.9,
-        alignText='center', anchorHoriz='center', autoLog=False)
-
-    # PRD 8.3: semi-transparent panel so the stimulus stays visible behind.
-    menu_box = visual.Rect(
-        win=win, width=state['aspect'] * MENU_BOX_W_FRAC,
-        height=MENU_BOX_H_FRAC, pos=(0, 0), lineWidth=0, lineColor=None,
-        fillColor=[-0.85, -0.85, -0.85], colorSpace='rgb',
-        opacity=MENU_BOX_OPACITY, autoLog=False)
-    # Anchored to the panel's left inner edge, not to screen centre: with
-    # anchorHoriz='center' PsychoPy centres a box of width wrapWidth on pos,
-    # so a wrapWidth wider than the screen pushes the first column off the
-    # left edge entirely.
-    _menu_w = state['aspect'] * MENU_BOX_W_FRAC
-    menu_text = visual.TextStim(
-        win, text='', font=READOUT_FONT, height=MENU_HEIGHT, color='white',
-        pos=(-_menu_w / 2.0 + MENU_PAD, 0),
-        wrapWidth=_menu_w - 2 * MENU_PAD,
-        alignText='left', anchorHoriz='left', autoLog=False)
-
-    flash = visual.TextStim(
-        win, text='', font=READOUT_FONT, height=0.030, color='yellow',
-        pos=(0, 0.42), alignText='center', anchorHoriz='center',
-        autoLog=False)
+    # ---- Stimuli, overlays (PRD 4, 6, 8) -------------------------------------
+    scene = build_scene(win, state, image)
     flash_frames = 0
     flash_text = ''
 
@@ -2684,16 +3098,12 @@ def main(argv=None):
         """One snapshot appended and the session file rewritten."""
         state['snapshots'].append(state_record(
             state, screen_height_cm, measured_refresh,
-            rolling_hz=rolling_hz, drops=dropped_frames,
+            rolling_hz=timer.rolling_hz, drops=timer.dropped,
             snapshot_number=len(state['snapshots']) + 1))
         write_json(state, session, out_path)
         return len(state['snapshots'])
 
-    # Rebuilding the Gaussian mask uploads a 256x256 texture, so it happens
-    # only when the SD or the size it is relative to actually changes.
-    mask_cache = [None]
-    # Same for the grating's waveform and mask: what the stim was built with.
-    grating_cache = {'tex': state['waveform'], 'mask': state['mask']}
+    flash_frames = 0
 
     # ---- Auto-repeat plumbing (PRD 5.1) --------------------------------------
     # KeyStateHandler only observes events, so it coexists with PsychoPy's own
@@ -2718,16 +3128,7 @@ def main(argv=None):
                              measured_refresh, args.image,
                              started=session_started, out_path=out_path,
                              preset_arg=args.preset, text_arg=args.text)
-    frame_clock = core.Clock()
-    intervals = collections.deque(maxlen=ROLLING_FRAMES)
-    startup_threshold = DROP_FACTOR / measured_refresh
-    dropped_frames = 0
-    total_flips = 0
-    rolling_hz, rolling_sd_ms = measured_refresh, None
-    # What the readout last showed of the timing figures, and when.
-    hud_clock = core.Clock()
-    hud_timing = {'at': -1.0, 'hz': rolling_hz, 'sd': None, 'drops': 0}
-    divergence_warned = False
+    timer = FrameTimer(measured_refresh)
 
     # ---- Main loop -----------------------------------------------------------
     running = True
@@ -2872,182 +3273,29 @@ def main(argv=None):
                     len(GAMMA_LEVELS))
                 flash_frames = FLASH_FRAMES
 
-        # ---- Live parameter application --------------------------------------
-        win.color = [state['bg_gray']] * 3
-
-        if stimulus_type == STIM_UNIFORM:
-            stim = uniform_patches[state['shape']]
-
-        if stim is not None:
-            stim.pos = (state['x_pos'], state['y_pos'])
-            stim.contrast = state['contrast']
-            if stimulus_type == STIM_UNIFORM:
-                size_patch(stim, state['size'])
-                stim.fillColor = [state['r'], state['g'], state['b']]
-                stim.opacity = state['alpha']
-            elif stimulus_type == STIM_TEXT:
-                family = state['font_family']
-                state['font_requested'], state['font_rendered'] = fonts[family]
-                stim.update(state)
-                state['text_extent'] = stim.extent()
-            else:
-                stim.size = state['size']
-            if stimulus_type in (STIM_GABOR, STIM_GRATING):
-                stim.sf = state['sf']
-                stim.ori = state['ori']
-                stim.phase = state['phase']
-            if stimulus_type == STIM_GABOR:
-                sd = round(gauss_sd_param(state['size'],
-                                          state['envelope_sd']), 6)
-                if sd != mask_cache[0]:
-                    # Assigning maskParams re-runs the mask setter, which
-                    # rebuilds the texture -- so only do it when sd moves.
-                    stim.maskParams = {'sd': sd}
-                    mask_cache[0] = sd
-            if stimulus_type == STIM_GRATING:
-                # tex and mask setters rebuild textures, so only on change.
-                if state['waveform'] != grating_cache['tex']:
-                    stim.tex = grating_cache['tex'] = state['waveform']
-                if state['mask'] != grating_cache['mask']:
-                    stim.mask = grating_mask(state)
-                    grating_cache['mask'] = state['mask']
-            if stimulus_type == STIM_CUSTOM_PNG:
-                stim.opacity = state['alpha']
-                stim.ori = state['rotation_deg']
-            if stimulus_type == STIM_RADIAL:
-                # The setters rebuild the texture coords, so only on change.
-                radial_cycles, angular_cycles = radial_cycles_for(state)
-                if stim.radialCycles != radial_cycles:
-                    stim.radialCycles = radial_cycles
-                if stim.angularCycles != angular_cycles:
-                    stim.angularCycles = angular_cycles
-
-        # ---- Draw ------------------------------------------------------------
-        mode = state['mode']
-        frames = mode_frames(state, measured_refresh)
-
-        if mode == MODE_GAMMA:
-            gamma_patch.width = state['aspect']
-            gamma_patch.fillColor = [
-                GAMMA_LEVELS[state['gamma_step_index']]] * 3
-            gamma_patch.draw()
-        elif mode == MODE_UNIFORMITY:
-            name = UNIFORMITY_GRID[state['uniformity_grid_index']]
-            uniformity_patch = uniformity_patches[state['shape']]
-            size_patch(uniformity_patch, state['size'])
-            uniformity_patch.pos = uniformity_xy(name, state['aspect'],
-                                                 state['size'])
-            uniformity_patch.fillColor = [state['r'], state['g'], state['b']]
-            uniformity_patch.opacity = state['alpha']
-            uniformity_patch.contrast = state['contrast']
-            uniformity_patch.draw()
-        elif mode == MODE_STATIC_OFF:
-            pass                      # background + fixation only (PRD 6)
-        elif stim is not None:
-            # static_on, or each copy's ON half of its own flicker cycle
-            # (PRD 6.1, 6.3).
-            for pos in drawn_positions(state, measured_refresh):
-                stim.pos = pos
-                stim.draw()
-            stim.pos = (state['x_pos'], state['y_pos'])
-
-        # Fixation cross in every mode EXCEPT the two measured ones. In gamma
-        # steps (PRD 6.2) the photometer sits at screen centre; in spatial
-        # uniformity it sits on the patch, which passes through centre at the
-        # middle cell. Either way a cross under the aperture would corrupt the
-        # reading, and the gamma curve is what everything else depends on.
-        if mode not in FIXATION_HIDDEN_MODES:
-            fixation.draw()
-
-        # The selection tick goes with the readout: [H] hides both, so a
-        # photometer or screenshot frame never carries it (PRD 6.3).
-        if (state['hud_visible'] and state['multi'] and
-                mode not in (MODE_GAMMA, MODE_UNIFORMITY)):
-            segment = marker_segment(state, footprint_radius(state))
-            if segment is not None:
-                marker.vertices = list(segment)
-                marker.draw()
-
-        if state['hud_visible']:
-            # Timing figures refresh on the clock (HUD_TIMING_INTERVAL_S);
-            # the strings are rebuilt every frame, but set_text re-lays out
-            # only when one differs, so a knob change shows on the next frame.
-            now = hud_clock.getTime()
-            if now - hud_timing['at'] >= HUD_TIMING_INTERVAL_S:
-                hud_timing.update(at=now, hz=rolling_hz, sd=rolling_sd_ms,
-                                  drops=dropped_frames)
-            set_text(hud, build_hud(state, resolution, measured_refresh,
-                                    hud_timing['hz'], screen_height_cm,
-                                    sd_ms=hud_timing['sd'],
-                                    drops=hud_timing['drops'], sweep=sweep,
-                                    out_name=os.path.basename(out_path)))
-            extra = hud.text.count('\n') - 4
-            hud.pos = (0, HUD_POS_Y + max(0, extra) * HUD_LINE_PITCH / 2.0)
-            hud.draw()
-
-        # Always drawn, whatever [H] says (PRD 8.2).
-        set_text(status, build_status_bar(state, os.path.basename(out_path)))
-        status.draw()
-
-        if state['menu_visible']:
-            menu_box.width = state['aspect'] * MENU_BOX_W_FRAC
-            menu_box.draw()
-            menu_text.pos = (-menu_box.width / 2.0 + MENU_PAD, 0)
-            set_text(menu_text, build_menu_text(state))
-            menu_text.draw()
-
+        # ---- Draw, flip, timing ----------------------------------------------
+        render_frame(win, scene, state, measured_refresh, resolution,
+                     screen_height_cm, timer, sweep=sweep,
+                     out_name=os.path.basename(out_path),
+                     flash_text=flash_text if flash_frames > 0 else None)
         if flash_frames > 0:
-            set_text(flash, flash_text)
-            flash.draw()
             flash_frames -= 1
-
         win.flip()
         state['frame_idx'] += 1
-
-        # ---- Frame timing, measured at the flip ------------------------------
-        # The first interval spans window setup and the intro screen, so it is
-        # discarded rather than counted as a drop.
-        interval = frame_clock.getTime()
-        frame_clock.reset()
-        total_flips += 1
-        if total_flips > 1:
-            # Threshold against the median of the window BEFORE this frame
-            # joins it, so a long frame cannot raise the bar it has to clear.
-            hz, sd_ms, median_s = rolling_stats(intervals)
-            if median_s is not None and len(intervals) >= MIN_DROP_SAMPLES:
-                threshold = DROP_FACTOR * median_s
-            else:
-                threshold = startup_threshold
-            if interval > threshold:
-                dropped_frames += 1
-
-            intervals.append(interval)
-            hz, sd_ms, _median = rolling_stats(intervals)
-            if hz is not None:
-                rolling_hz, rolling_sd_ms = hz, sd_ms
-                # Once only: a full window that disagrees with getMsPerFrame
-                # means one of the two is wrong, and the frame counts driving
-                # every flicker frequency are built on the startup figure.
-                if (not divergence_warned
-                        and len(intervals) >= ROLLING_FRAMES
-                        and abs(rolling_hz - measured_refresh)
-                        > DIVERGENCE_WARN_HZ):
-                    divergence_warned = True
-                    print("WARNING: rolling refresh ({:.1f} Hz) diverges from "
-                          "startup measurement ({:.1f} Hz) -- timing may be "
-                          "unreliable".format(rolling_hz, measured_refresh))
+        timer.tick()
 
     # ---- Quit ----------------------------------------------------------------
     session['session_end'] = datetime.datetime.now().isoformat(
         timespec='seconds')
     session['final_rolling_refresh_hz'] = (
-        None if rolling_hz is None else round(rolling_hz, 3))
+        None if timer.rolling_hz is None else round(timer.rolling_hz, 3))
     session['final_rolling_refresh_sd_ms'] = (
-        None if rolling_sd_ms is None else round(rolling_sd_ms, 4))
-    session['total_dropped_frames'] = dropped_frames
+        None if timer.rolling_sd_ms is None
+        else round(timer.rolling_sd_ms, 4))
+    session['total_dropped_frames'] = timer.dropped
 
     final = state_record(state, screen_height_cm, measured_refresh,
-                         rolling_hz=rolling_hz, drops=dropped_frames)
+                         rolling_hz=timer.rolling_hz, drops=timer.dropped)
     path = write_json(state, session, out_path, final=final)
     win.close()
 

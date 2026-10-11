@@ -20,7 +20,7 @@ Monical does not run experiments, collect data, or apply corrections automatical
 - **PsychoPy** (required) — stimulus rendering, frame timing, window management. Every vision science lab using Python already has this.
 - **psychopy_visionscience** (optional, guarded import) — needed only for the radial checkerboard stimulus. All other modes work without it. Failure reported on the info screen with the pip install command.
 - **NumPy** (comes with PsychoPy)
-- **argparse** (stdlib) — used for the `--image`, `--preset` and `--text` flags only.
+- **argparse** (stdlib) — used for the `--image`, `--preset`, `--text` and `--bench` flags only.
 - No other dependencies.
 
 ---
@@ -44,6 +44,14 @@ Restoring saved knob settings (see §10):
 ```
 python monical.py --preset presets/preset_2026-09-18_143201.json
 ```
+
+Benchmarking frame timing on the rig instead of running a session:
+
+```
+python monical.py --bench
+```
+
+`--bench` opens fullscreen, measures the refresh as a session would, and needs no input; `Q` or `ESC` aborts. It runs each of the six types at 1, 2, 8 and 16 copies in flicker mode 3 with the readout off, 600 recorded frames each after a 30-frame warm-up. The radial type is skipped with a note if the plugin is missing, and the PNG type uses `--image` if given, otherwise the generated pattern held in memory. A final run uses 16 Gabor copies with the readout on, to show what it costs on that machine. Each configuration records draw time (mean, p95, max), flip-to-flip interval (mean, max), dropped frames (same rule as §3.2) and the draw mean as a percentage of the frame budget. Results go to `bench_YYYYMMDD_HHMMSS.json` beside the script, with the same system header as a session file plus the GL vendor, renderer and version. The file is rewritten after every configuration, so an aborted run keeps what finished. A console table at the end marks (`!`) any configuration that dropped frames or whose draw mean exceeded 80% of the budget. The benchmark runs the same scene-building, per-frame drawing and frame-timing code as a session.
 
 ### 3.1 Screen flow
 

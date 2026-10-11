@@ -38,6 +38,7 @@ python monical.py
 python monical.py --image assets/texture.png
 python monical.py --preset presets/preset_2026-09-18_143201.json
 python monical.py --text "MYSTRING"
+python monical.py --bench
 ```
 
 `--image PATH` supplies the texture for stimulus type `[5]`. Without it, `[5]`
@@ -52,6 +53,9 @@ Without it they cycle five built-in strings: `ABCDEF`, `abcdef`, `123456`,
 `XXXXXX`, `oOoOoO`. A single character cycles its alphabet, starting there. A longer string cycles the full string, then each of its
 characters, then the whole alphabet. There is no on-screen text entry. The raw
 value is recorded as `text_arg` in the session file.
+
+`--bench` measures frame timing instead of running a session — see
+§5i.
 
 There is no config file, no build step, and no installer. Each session writes
 one file, `monical_YYYY-MM-DD_HHMMSS.json`, next to the script — a new one
@@ -180,7 +184,10 @@ out of the layout without changing the count. The ring line shows `STEADY` or
 
 Copies can land off screen: the ring's radius is |X|, so at the default
 X = 0.66 copies above and below fixation sit past the top and bottom edges.
-Line 2 shows `OFFSCREEN n` when any copy is cut off. A `!` after a copy's
+Line 2 shows `OFFSCREEN n` when any copy is cut off. **Text at its default
+size is wider than the ring spacing allows**: `ABCDEF` at size 0.225 is about
+0.8 units wide, so every copy reads off screen even at X = 0.66. For
+multi-copy text, use a smaller size or a shorter string. A `!` after a copy's
 number on the ring line marks it, and if it is the selected one the status
 bar says `SELECTED #k OFF SCREEN`. Line 3's eccentricity becomes the
 selected copy's, labelled `Ecc(#k)`.
@@ -495,6 +502,40 @@ long enough for your probe to settle, step manually with `S` instead.
    not in the observer's field.
 
 ---
+
+### i) Verifying frame timing on your rig
+
+Run this **fullscreen on the experiment display**, on the machine that will
+run the experiment, before relying on any flicker measurement there:
+
+```bash
+python monical.py --bench
+```
+
+It needs no input and takes about 25 configurations × 10 s at 60 Hz, less at
+higher refresh rates. `Q` or `ESC` stops it early and keeps what finished. It
+runs every stimulus type at 1, 2, 8 and 16 copies in flicker mode `3` with the
+readout off, then 16 Gabor copies with the readout on, 600 frames each.
+
+At the end it prints a table and writes `bench_YYYYMMDD_HHMMSS.json` beside
+the script:
+
+| Column | Meaning |
+|---|---|
+| `draw ms` / `p95` / `max` | CPU time to draw one frame, before the flip: mean, 95th percentile, worst |
+| `intv ms` / `intv max` | flip-to-flip interval: mean (should be 1000 / refresh), worst |
+| `drops` | frames whose interval ran past 1.5× the rolling median |
+| `%bud` | mean draw time as a share of one frame (4.17 ms at 240 Hz) |
+| `!` | dropped frames, or a draw mean above 80% of the frame |
+
+**Any dropped frames at a given copy count mean flicker verification on that
+machine is unreliable at that N.** A dropped frame stretches one cycle, which
+is exactly the error an oscilloscope check is meant to catch, so it would read
+as a display fault. Reduce the copy count, or fix the machine (power plan,
+background load, driver vsync settings), and re-run until the row is clean.
+A draw mean above 80% leaves no headroom: it may pass the benchmark and still
+drop under real conditions. The readout-on row shows what the readout costs
+on that machine; hide it with `H` while measuring if that row is marked.
 
 ## 6. Output file
 
