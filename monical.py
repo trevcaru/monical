@@ -205,11 +205,13 @@ FLICKER_HZ = {MODE_FLICKER_15: 15, MODE_FLICKER_20: 20}
 # the patch exactly under the cross).
 FIXATION_HIDDEN_MODES = (MODE_GAMMA, MODE_UNIFORMITY)
 
-# [7] toggles dual rendering, which is a flag rather than a mode because
-# PRD 6.3 says both copies "flicker at the same frequency IF IN A FLICKER
-# MODE" -- that only has meaning while a flicker mode is still selected, so
-# dual has to compose with the mode rather than replace it.
+# [7] toggles multi-stimulus rendering (PRD 6.3), which is a flag rather than
+# a mode: the copies flicker IN whatever flicker mode is selected, so multi
+# has to compose with the mode rather than replace it. N copies sit on a ring
+# through (X, Y) around (0, Y); N = 2 is the original dual layout.
 DUAL_KEY = '7'
+MULTI_MIN, MULTI_MAX = 2, 16
+STEP_RING = 5.0
 
 # PRD 6.2 -- 11 levels in PsychoPy rgb units, index 5 is mid-gray.
 GAMMA_LEVELS = [-1.0, -0.8, -0.6, -0.4, -0.2, 0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
@@ -279,6 +281,12 @@ KNOBS = {
     'j':            ('flicker_frames', +STEP_FRAMES, 2, None, 'int'),
     'semicolon':    ('viewing_distance_cm', +STEP_DISTANCE, 1, 500, 'int'),
     'apostrophe':   ('viewing_distance_cm', -STEP_DISTANCE, 1, 500, 'int'),
+    # Multi-stimulus ring (PRD 6.3). ']' adds a stimulus; ',' turns the ring
+    # +5 deg (counter-clockwise), '.' turns it back.
+    'bracketright': ('multi_count', +1, MULTI_MIN, MULTI_MAX, 'int'),
+    'bracketleft':  ('multi_count', -1, MULTI_MIN, MULTI_MAX, 'int'),
+    'comma':        ('ring_offset_deg', +STEP_RING, 0.0, 360.0, 'wrap'),
+    'period':       ('ring_offset_deg', -STEP_RING, 0.0, 360.0, 'wrap'),
 }
 
 # Stimulus-specific knobs (PRD 4.2-4.5), overlaid on KNOBS once the type is
@@ -722,7 +730,10 @@ def default_state(stimulus_type, refresh_hz=60.0):
         # Selection
         'stimulus_type': stimulus_type,
         'mode': MODE_STATIC_ON,
-        'dual': False,            # PRD 6.3, orthogonal to mode
+        # PRD 6.3, orthogonal to mode. The count is kept while multi is off.
+        'multi': False,
+        'multi_count': MULTI_MIN,
+        'ring_offset_deg': 0.0,
 
         # Screen geometry, filled in once the window is open. Needed for the
         # full-screen gamma patch, the uniformity grid extents and the pixel
@@ -1250,7 +1261,7 @@ def build_intro_text(resolution, refresh_hz, selected_index, image_label,
         "",
         "MODES: [1] static ON  [2] static OFF  [3] 15 Hz  [4] 20 Hz",
         "       [5] custom Hz  [G] gamma steps  [8] spatial uniformity",
-        "       [7] toggles DUAL (two copies at +/-X, same flicker)",
+        "       [7] MULTI ring on/off  [ / ] copies 2-16  [,/.] rotate",
         "[S] snapshot  [P] save preset  [F12] screenshot  [A] auto gamma",
         "[Q] quit (saves final state)",
         "",
@@ -1324,10 +1335,57 @@ def _deg(value):
     return '--' if value is None else '{:.2f}'.format(value)
 
 
-def mode_line(state):
-    """HUD line 2. Mode, dual flag, and whatever the mode itself owns."""
+def ring_positions(state):
+    """Centre of every drawn copy of the stimulus, height units (PRD 6.3).
+
+    Multi off: just (X, Y). On: N copies on a ring of radius |X| about
+    (0, Y), copy i at base + offset + i * 360 / N degrees, counter-clockwise,
+    base pointing toward the sign of X. Rounded to 12 dp so that N = 2,
+    offset 0 lands EXACTLY on (X, Y) and (-X, Y) -- sin(180 deg) is not
+    quite 0 in floating point.
+    """
+    x, y = state['x_pos'], state['y_pos']
+    if not state['multi']:
+        return [(x, y)]
+    n, radius = state['multi_count'], abs(x)
+    base = 0.0 if x >= 0 else 180.0
+    positions = []
+    for i in range(n):
+        angle = math.radians(base + state['ring_offset_deg'] + i * 360.0 / n)
+        positions.append((round(radius * math.cos(angle), 12),
+                          round(y + radius * math.sin(angle), 12)))
+    return positions
+
+
+def ring_overlap(state):
+    """True when neighbouring copies are closer than the stimulus size.
+
+    Compares the chord between neighbours, 2 r sin(pi / N), with the size.
+    A warning only -- nothing is moved.
+    """
+    if not state['multi']:
+        return False
+    chord = 2.0 * abs(state['x_pos']) * math.sin(
+        math.pi / state['multi_count'])
+    return chord < state['size']
+
+
+def mode_label(state, refresh_hz):
+    """Mode for the readout: 3 and 4 show their target AND realised rate."""
     mode = state['mode']
-    parts = ['Mode: {}'.format(mode)]
+    if mode in FLICKER_HZ:
+        frames = hz_to_frames(FLICKER_HZ[mode], refresh_hz)
+        on, off = flicker_split(frames)
+        return 'Flicker {} ({:.2f} Hz{})'.format(
+            FLICKER_HZ[mode], frames_to_hz(frames, refresh_hz),
+            ' ASYM' if on != off else '')
+    return mode
+
+
+def mode_line(state):
+    """HUD line 2. Mode, multi ring, and whatever the mode itself owns."""
+    mode = state['mode']
+    parts = ['Mode: {}'.format(mode_label(state, state['refresh_hz']))]
     if mode == MODE_GAMMA:
         index = state['gamma_step_index']
         level = GAMMA_LEVELS[index]
@@ -1340,8 +1398,11 @@ def mode_line(state):
         parts.append('Cell: {} ({:.2f}, {:.2f})'.format(name, grid_x, grid_y))
     else:
         parts.append('Stim: {}'.format(state['stimulus_type']))
-    if state['dual']:
-        parts.append('DUAL +/-X')
+    if state['multi']:
+        parts.append('MULTI {} r {:.2f} off {:g}{}'.format(
+            state['multi_count'], abs(state['x_pos']),
+            state['ring_offset_deg'],
+            ' OVERLAP' if ring_overlap(state) else ''))
     return ' | '.join(parts)
 
 
@@ -1422,7 +1483,7 @@ def build_status_bar(state, out_name=''):
                 MENU_TOGGLE_KEY.upper(),
                 'ON' if state['menu_visible'] else 'OFF',
                 flicker_text(state['flicker_frames'], state['refresh_hz']),
-                state['mode'], name)
+                mode_label(state, state['refresh_hz']), name)
 
 
 MENU_STIM_KEYS = {
@@ -1449,7 +1510,8 @@ def build_menu_text(state):
         'DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast',
         "FREQUENCY: F/J = Custom flicker +/-1 frame | ;/' = Viewing distance",
         'MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom',
-        '           G=Gamma  7=Dual  8=Uniformity',
+        '           G=Gamma  7=Multi on/off  8=Uniformity',
+        'RING:      [/] = Copies 2-16 | ,/. = Rotate +/-5 deg',
         'ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot',
         '           H=Toggle HUD  M=This menu  Q=Quit',
         '',
@@ -1616,6 +1678,18 @@ def stimulus_specific(state):
     return record
 
 
+def stimuli_record(state, screen_height_cm):
+    """Every drawn copy: position and its own eccentricity from fixation."""
+    record = []
+    for index, (x, y) in enumerate(ring_positions(state)):
+        ecc = eccentricity_deg(math.hypot(x, y), screen_height_cm,
+                               state['viewing_distance_cm'])
+        record.append({'index': index, 'x': round(x, STORE_DP),
+                       'y': round(y, STORE_DP),
+                       'ecc_deg': None if ecc is None else round(ecc, 2)})
+    return record
+
+
 def state_record(state, screen_height_cm, refresh_hz=None,
                  rolling_hz=None, drops=None, snapshot_number=None):
     angle = visual_angle_deg(state['size'], screen_height_cm,
@@ -1636,7 +1710,14 @@ def state_record(state, screen_height_cm, refresh_hz=None,
         'dropped_frames_total': drops,
         'stimulus_type': state['stimulus_type'],
         'mode': state['mode'],
-        'dual_stimulus': bool(state['dual']),
+        # Back-compat: the old dual flag is exactly the two-copy ring.
+        'dual_stimulus': bool(state['multi'] and state['multi_count'] == 2),
+        'multi_active': bool(state['multi']),
+        'multi_count': state['multi_count'],
+        'ring_offset_deg': round(state['ring_offset_deg'], STORE_DP),
+        'ring_radius': round(abs(state['x_pos']), STORE_DP),
+        'ring_center_y': round(state['y_pos'], STORE_DP),
+        'stimuli': stimuli_record(state, screen_height_cm),
         'x_position': round(state['x_pos'], STORE_DP),
         'y_position': round(state['y_pos'], STORE_DP),
         'background_gray': round(state['bg_gray'], STORE_DP),
@@ -1968,6 +2049,11 @@ def apply_preset(state, loaded, text_presets=None):
     reach the stimulus constructor unchecked.
     """
     loaded = dict(loaded)
+    if 'dual' in loaded:
+        # Pre-ring presets: dual on is the two-copy ring at offset 0.
+        if loaded.pop('dual') is True and 'multi' not in loaded:
+            loaded.update(multi=True, multi_count=2, ring_offset_deg=0.0)
+            print("Preset: dual -> multi-stimulus ring, 2 copies, offset 0")
     frames = preset_flicker_frames(loaded, state['refresh_hz'])
     # refresh_hz describes the rig a preset was saved on, never this one.
     for key in ('flicker_frames', 'refresh_hz', 'custom_freq_hz'):
@@ -2294,7 +2380,7 @@ def main(argv=None):
                     state['frame_idx'] = 0
                 continue
             if claim == 'dual':
-                state['dual'] = not state['dual']
+                state['multi'] = not state['multi']
                 continue
 
             # --- Auto gamma sweep (PRD 6.5). [A] is a knob on several stimulus
@@ -2477,12 +2563,11 @@ def main(argv=None):
             # static_on, or the ON half of a flicker cycle. stim_is_on is
             # stateless in frame_idx, which resets on every mode switch.
             if frames is None or stim_is_on(state['frame_idx'], frames):
-                stim.draw()
-                if state['dual']:
-                    # PRD 6.3: the mirrored copy at -X, same flicker phase.
-                    stim.pos = (-state['x_pos'], state['y_pos'])
+                # PRD 6.3: one copy, or N on the ring, same flicker phase.
+                for pos in ring_positions(state):
+                    stim.pos = pos
                     stim.draw()
-                    stim.pos = (state['x_pos'], state['y_pos'])
+                stim.pos = (state['x_pos'], state['y_pos'])
 
         # Fixation cross in every mode EXCEPT the two measured ones. In gamma
         # steps (PRD 6.2) the photometer sits at screen centre; in spatial

@@ -35,7 +35,7 @@ Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build st
 
 ## Modes
 
-`1` static ON · `2` static OFF · `3` flicker 15 Hz · `4` flicker 20 Hz · `5` flicker at the custom rate · `G` gamma steps (11 levels) · `8` spatial uniformity (3×3 grid) · `7` toggles dual stimuli at ±X
+`1` static ON · `2` static OFF · `3` flicker 15 Hz · `4` flicker 20 Hz · `5` flicker at the custom rate · `G` gamma steps (11 levels) · `8` spatial uniformity (3×3 grid) · `7` toggles N copies (2–16) on a ring through the stimulus position; N = 2 is the ±X pair
 
 Flicker is driven by integer frame counts, so the readout always reports the **realized** frequency, never the requested one.
 
@@ -49,6 +49,7 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `C`/`V` | contrast ±0.001 |
 | `F`/`J` | custom flicker (mode 5) ±1 frame, so every press is a new realized rate |
 | `;`/`'` | viewing distance ±1 cm |
+| `[`/`]` · `,`/`.` | multi-stimulus ring: copies 2–16 · rotate ±5° |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
 | `Z/X` / `R/T` | radial only: rings ±1 (1–20) / wedges ±2 (2–32) |
 | `D/A` / `B` | grating only: waveform sin/sqr/saw / circular mask on-off |

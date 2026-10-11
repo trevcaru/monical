@@ -110,6 +110,8 @@ until you fix the width in PsychoPy Monitor Center (§8).
 | Contrast | `C` / `V` | ±0.001 | 0.0 to 1.0 | hold |
 | Custom flicker (mode 5) | `F` / `J` | ±1 frame | 2 frames to round(refresh) frames | hold |
 | Viewing distance | `;` / `'` | ±1 cm | 1 to 500 | single press |
+| Ring copies (multi) | `[` / `]` | ±1 | 2 to 16 | single press |
+| Ring offset (multi) | `,` / `.` | ±5° | wraps 0–360 | single press |
 
 Custom flicker is a cycle length in **whole frames**. `F` raises the rate (one
 frame fewer) and `J` lowers it, so every press changes the realized Hz. It
@@ -143,14 +145,21 @@ full screen height), color and contrast in `rgb` (−1 = black, 0 = mid-gray,
 | `4` | Flicker 20 Hz |
 | `5` | Flicker at the custom frame count (`F` / `J`) |
 | `G` | Gamma steps — fullscreen patch, 11 levels |
-| `7` | Dual stimulus — toggle, not a mode |
+| `7` | Multi-stimulus ring — toggle, not a mode (`[` `]` copies, `,` `.` rotate) |
 | `8` | Spatial uniformity — patch on a 3×3 grid |
 
 `6` is unassigned. Switching mode resets the flicker phase to frame 0.
 
 `7` is a **toggle** that composes with whatever mode is active: turn it on
-during `3` and you get two copies flickering in phase at 15 Hz. Every other
+during `3` and you get N copies flickering in phase at 15 Hz. Every other
 mode key replaces the current mode.
+
+The copies sit on a ring centred at (0, Y) through the stimulus position, so
+its radius is |X|. `]` and `[` set the count from 2 to 16, and `,` and `.`
+turn the ring in 5° steps. With 2 copies and no rotation you get the classic
+±X pair. Readout line 2 shows `MULTI N r ... off ...` and adds `OVERLAP` when
+neighbouring copies are closer than the stimulus size. Nothing is moved for
+you. Gamma steps and spatial uniformity always draw one patch.
 
 ### Actions
 
@@ -228,7 +237,7 @@ everywhere.
 | Shape | `B` | toggle | `rect` | `rect`, `circle` | single press |
 
 The circle's diameter is the size value. It renders exactly the same colour as
-the rect (PRD 4.4). Dual (`7`) and spatial uniformity (`8`) use the current
+the rect (PRD 4.4). Multi (`7`) and spatial uniformity (`8`) use the current
 shape; gamma steps (`G`) always fills the screen.
 
 **Custom PNG**
@@ -606,7 +615,9 @@ measurement.
 **Line 2 — mode.** Mode name, the session's output filename, then either the stimulus type or, in the two
 modes that own the screen, what that mode owns — in gamma steps
 `Level 9/11: +0.6 rgb (204 8-bit)`, in spatial uniformity
-`Cell: top_left (-0.78, 0.39)`. `DUAL +/-X` appears when `7` is on.
+`Cell: top_left (-0.78, 0.39)`. `MULTI 4 r 0.66 off 0` appears when `7` is on,
+with `OVERLAP` if neighbouring copies collide. Modes `3` and `4` show their
+target and realized rate, e.g. `Flicker 15 (14.40 Hz)`.
 
 **Line 3 — geometry.** Position in height units with the pixel coordinate
 beside it, then size and eccentricity in degrees, with size also in pixels.

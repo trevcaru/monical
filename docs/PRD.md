@@ -124,6 +124,12 @@ Contains:
         "angularCycles": 8.0,
         "radialPhase": 0.25
       },
+      "multi_active": false,
+      "multi_count": 2,
+      "ring_offset_deg": 0.0,
+      "ring_radius": 0.66,
+      "ring_center_y": 0.0,
+      "stimuli": [{"index": 0, "x": 0.66, "y": 0.0, "ecc_deg": 28.57}],
       "flicker_active": false,
       "flicker_frames": 16,
       "flicker_on_frames": 8,
@@ -248,7 +254,7 @@ Circle(win=win, radius=size / 2, edges=256, fillColor=[r, g, b],
        opacity=alpha, contrast=contrast, pos=(x, y), autoLog=False)
 ```
 
-The circle is a ShapeStim fill, the same render path as the rect. It is not a masked GratingStim, whose texture and mask stages could change the colour. Dual stimulus (§6.3) and spatial uniformity (§6.4) draw the current shape. Gamma steps (§6.2) is always the full-screen rect.
+The circle is a ShapeStim fill, the same render path as the rect. It is not a masked GratingStim, whose texture and mask stages could change the colour. Multi-stimulus (§6.3) and spatial uniformity (§6.4) draw the current shape. Gamma steps (§6.2) is always the full-screen rect.
 
 **Colour equivalence (measured).** Rect and circle were rendered offscreen at the same parameters, and a central 100×100 px region well inside both shapes was compared. They were identical (0 differing pixels) in every case: mid-gray on a −0.5 background, near-black −0.95, pure red, pure green, pure blue, green at alpha 0.5 over a 0.3 background, and 0.4 gray at contrast 0.5 over −0.2. The circle at size 0.225 measures 242 px across on a 1080-px-tall window (0.225 × 1080 = 243).
 
@@ -384,6 +390,8 @@ Active in all stimulus modes.
 | Contrast | `[C/V]` | ±0.001 | 1.000 | 0.0–1.0 |
 | Custom flicker (mode 5) | `[F/J]` | ±1 frame | nearest to 15 Hz | 2 frames (refresh/2) to round(refresh) frames (~1 Hz) |
 | Viewing distance | `[;/']` | ±1 cm | 40 | 1–500 |
+| Ring copies (multi) | `[ / ]` | ±1 | 2 | 2–16 |
+| Ring offset (multi) | `[, / .]` | ±5° | 0 | 0–360, wraps |
 
 Arrows move the stimulus; the page keys adjust the background behind it.
 
@@ -420,7 +428,7 @@ Toggled by number keys. Active across all stimulus types.
 | `[4]` | Flicker 20 Hz | Nearest whole-frame cycle: 12 frames at 240 Hz, 3 at 60 Hz (1 on/2 off), 7 at 144 Hz (20.57 Hz, 3 on/4 off). Oscilloscope check. |
 | `[5]` | Flicker custom | Cycle of `[F/J]` whole frames. Shows realized Hz and the on/off split. |
 | `[G]` | Gamma steps | Full-screen uniform patch, 11 levels (0%–100%). LEFT/RIGHT to step. Fixation cross hidden. |
-| `[7]` | Dual stimulus | Two stimuli at ±X eccentricity simultaneously. Matches two-stimulus experiment layout. |
+| `[7]` | Multi-stimulus | Toggles N copies on a ring through (X, Y); `[ / ]` set N (2–16), `[, / .]` rotate (§6.3). N = 2 is the original ±X dual layout. |
 | `[8]` | Spatial uniformity | Uniform patch movable to a 3×3 grid (center, corners, midpoints). Arrow keys move between grid positions. |
 
 Non-mode action keys, active throughout the test routine:
@@ -454,9 +462,35 @@ Fixation cross is **hidden** in this mode — the photometer goes at screen cent
 
 Snapshots in this mode include `gamma_level` in `stimulus_specific`.
 
-### 6.3 Dual stimulus mode
+### 6.3 Multi-stimulus mode
 
-Renders two instances of the current stimulus type at positions (x, y) and (-x, y). Both flicker at the same frequency if in a flicker mode. For verifying the full experiment display load.
+`[7]` toggles multi-stimulus rendering: **N copies of the current stimulus on a ring**, for verifying the full display load of a multi-stimulus experiment. It is a flag, not a mode, so it composes with static ON, static OFF and every flicker mode. Gamma steps and spatial uniformity always draw their single patch, as before.
+
+**Geometry.** The ring is centred at (0, Y) with radius |X|, so it passes through the single stimulus's position. Copy *i* sits at angle `base + offset + i * 360 / N` degrees, counter-clockwise, where `base` points toward the sign of X: 0° for X ≥ 0, 180° for X < 0.
+
+```python
+x_i = r * cos(a_i)        y_i = Y + r * sin(a_i)      # r = |X|
+```
+
+Positions are rounded to 12 decimal places so that **N = 2 at offset 0 reproduces the original dual layout exactly**, (X, Y) and (−X, Y). *Verified* bit-identical against the pre-ring code for every X the knob can reach and six Y values, and in F12 screenshots of the real loop for all six types (0 differing pixels). With multi off, the stimulus is drawn once at (X, Y), as before.
+
+| Param | Key | Increment | Default | Range |
+|-------|-----|-----------|---------|-------|
+| Multi on/off | `[7]` | toggle | off | — |
+| Copies (N) | `[ / ]` | ±1 | 2 | 2–16 |
+| Ring offset | `[, / .]` | ±5° | 0 | 0–360, wraps |
+
+`]` adds a copy and `[` removes one. `,` turns the ring +5° (counter-clockwise) and `.` turns it back. All are single-press. The count and offset are kept while multi is off.
+
+All copies share every parameter, including flicker: the same frame count and the same `frame_idx` phase, so they switch on and off together.
+
+**Overlap warning.** When the chord between neighbours, `2 * r * sin(pi / N)`, is less than the stimulus size, readout line 2 shows `OVERLAP`. Nothing is moved; the operator decides.
+
+**Eccentricity.** Each copy's eccentricity is the existing displacement formula (§7) applied to its own distance from fixation, `sqrt(x_i^2 + y_i^2)`.
+
+**Snapshot fields:** `multi_active`, `multi_count`, `ring_offset_deg`, `ring_radius`, `ring_center_y`, and `stimuli`, a list of `{index, x, y, ecc_deg}` (one entry when multi is off). `dual_stimulus` is kept for back-compatibility: it is true only when multi is on with N = 2, the layout the old flag meant.
+
+**Presets** save `multi`, `multi_count` and `ring_offset_deg`. A preset from before the ring with `dual: true` loads as multi on, N = 2, offset 0, with a console line. The count is clamped to 2–16 and the offset wraps into 0–360.
 
 ### 6.4 Spatial uniformity mode
 
@@ -508,11 +542,13 @@ Bottom center, small monospace text, updates every frame. Adapts to the current 
 
 ```
 Line 1: [resolution] | [refresh Hz avg] | PsychoPy [ver] | Dist: [cm] cm
-Line 2: Mode: [name] | Stim: [type]
+Line 2: Mode: [name] | Stim: [type] [| MULTI N r [radius] off [deg] [OVERLAP]]
 Line 3: X: [val] | Y: [val] | Size: [val] ([deg]°) | Ecc: [deg]°
 Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] fr, [on] on/[off] off) [ASYM]
 Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
 ```
+
+Modes 3 and 4 show their target and the realised rate in the mode name, on line 2 and in the status bar: `Flicker 15 (14.40 Hz)` or `Flicker 20 (20.57 Hz ASYM)` at 144 Hz. The JSON `mode` field keeps the plain identifier (`flicker_15hz`). Mode 5's rate is on line 4 and in the status bar's `[F/J] Custom` field.
 
 If line 5 is wider than the screen (a long `--text` string or PNG filename), it wraps at a ` | ` boundary onto a line 6. The font never shrinks. A wrapped readout moves up half a line so its bottom edge stays clear of the status bar.
 
@@ -565,7 +601,8 @@ MOVEMENT:  LEFT/RIGHT = X position | UP/DOWN = Y position
 DISPLAY:   PAGEUP/DN = Background | +/- = Size | C/V = Contrast
 FREQUENCY: F/J = Custom flicker +/-1 frame | ;/' = Viewing distance
 MODES:     1=ON  2=OFF  3=15Hz  4=20Hz  5=Custom
-           G=Gamma  7=Dual  8=Uniformity
+           G=Gamma  7=Multi on/off  8=Uniformity
+RING:      [/] = Copies 2-16 | ,/. = Rotate +/-5 deg
 ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot
            H=Toggle HUD  M=This menu  Q=Quit
 
