@@ -196,13 +196,18 @@ legend is always on HUD line 5.
 | Phase | `E` / `W` | ±0.05 | 0.5 | 0.0–1.0 |
 | Envelope SD | `D` / `A` | ±0.01 | 0.06 | 0.01–1.0 |
 
-**Sinusoidal grating** — same as Gabor without the envelope:
+**Sinusoidal grating** — the Gabor carrier without the envelope:
 
 | Param | Keys | Step | Default | Range |
 |---|---|---|---|---|
 | Spatial frequency | `Z` / `X` | ±0.5 | 4.0 | 0.5–50.0 |
 | Orientation | `R` / `T` | ±5° | 0.0 | wraps 0–360 |
 | Phase | `E` / `W` | ±0.05 | 0.5 | 0.0–1.0 |
+| Waveform | `D` / `A` | next / previous | `sin` | `sin`, `sqr`, `saw` (wraps) |
+| Mask | `B` | toggle | `none` | `none`, `circle` |
+
+`N` does nothing for this type. In gamma mode `A` starts the auto sweep, as
+everywhere.
 
 **Uniform patch**
 
@@ -212,12 +217,18 @@ legend is always on HUD line 5.
 | Green | `E` / `W` | ±0.001 | 0.0 | −1.0–1.0 | hold |
 | Blue | `D` / `A` | ±0.001 | 0.0 | −1.0–1.0 | hold |
 | Alpha | `Z` / `X` | ±0.01 | 1.0 | 0.0–1.0 | single press |
+| Shape | `B` | toggle | `rect` | `rect`, `circle` | single press |
+
+The circle's diameter is the size value. It renders exactly the same colour as
+the rect (PRD 4.4). Dual (`7`) and spatial uniformity (`8`) use the current
+shape; gamma steps (`G`) always fills the screen.
 
 **Custom PNG**
 
 | Param | Keys | Step | Default | Range |
 |---|---|---|---|---|
 | Alpha | `Z` / `X` | ±0.01 | 1.0 | 0.0–1.0 |
+| Rotation | `R` / `T` | ±5° | 0 | wraps 0–360 |
 
 **Text / letter string**
 
@@ -499,9 +510,9 @@ nothing you dialed in is lost to rounding.
 |---|---|
 | `radial_checkerboard` | `rings`, `wedges`, `radialCycles`, `angularCycles`, `radialPhase` |
 | `gabor` | `sf`, `ori`, `phase`, `envelope_sd` |
-| `grating` | `sf`, `ori`, `phase` |
-| `uniform_patch` | `r`, `g`, `b`, `alpha` |
-| `custom_png` | `filepath`, `alpha` |
+| `grating` | `sf`, `ori`, `phase`, `waveform`, `mask` |
+| `uniform_patch` | `r`, `g`, `b`, `alpha`, `shape` |
+| `custom_png` | `filepath`, `alpha`, `rotation_deg` |
 | `text` | `text_string`, `font`, `alpha`, `r`, `g`, `b` |
 
 Plus, depending on mode: `gamma_level` and `gamma_step_index` in gamma steps;

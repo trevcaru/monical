@@ -28,9 +28,9 @@ Pick a stimulus type with `1`–`6`, press `SPACE`. No config files, no build st
 |---|---|
 | **Radial checkerboard** — SSVEP standard dartboard. Rings and wedges adjustable; defaults (4 rings, 16 wedges) are pixel-identical to the original construction. | **Gabor patch** — sinusoidal carrier under a Gaussian envelope. SF, orientation, phase, envelope SD. |
 | ![Radial checkerboard](docs/img/radial_checkerboard.png) | ![Gabor patch](docs/img/gabor.png) |
-| **Sinusoidal grating** — the same carrier, no envelope. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha (shown: green channel isolated). |
+| **Sinusoidal grating** — the same carrier, no envelope; sin, square or sawtooth, optional circular mask. Contrast sensitivity, SF tuning. | **Uniform patch** — per-channel R/G/B and alpha, rect or circle (shown: green channel isolated). |
 | ![Sinusoidal grating](docs/img/grating.png) | ![Uniform patch](docs/img/uniform.png) |
-| **Custom PNG** — your own texture via `--image`. Without it, this generated 8×8 checkerboard. | **Text / letter string** — monospaced strings for legibility and acuity checks. Cycle presets with `B`/`N`, or pass `--text`. |
+| **Custom PNG** — your own texture via `--image`, rotatable. Without it, this generated 8×8 checkerboard. | **Text / letter string** — monospaced strings for legibility and acuity checks. Cycle presets with `B`/`N`, or pass `--text`. |
 | ![Custom PNG fallback](docs/img/custom_png.png) | ![Text stimulus](docs/img/text.png) |
 
 ## Modes
@@ -51,6 +51,9 @@ Flicker is driven by integer frame counts, so the readout always reports the **r
 | `;`/`'` | viewing distance ±1 cm |
 | `Z/X` `R/T` `E/W` `D/A` | stimulus-specific (SF, orientation, phase, SD — or R, G, B, alpha) |
 | `Z/X` / `R/T` | radial only: rings ±1 (1–20) / wedges ±2 (2–32) |
+| `D/A` / `B` | grating only: waveform sin/sqr/saw / circular mask on-off |
+| `B` | uniform only: rect / circle |
+| `R/T` | custom PNG only: rotation ±5° |
 | `S` / `Q` | snapshot / quit and save |
 | `P` / `F12` | save preset / save screenshot PNG |
 | `A` | gamma mode only: automatic 11-level sweep, 2 s per level |

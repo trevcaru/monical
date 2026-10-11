@@ -144,6 +144,16 @@ STATUS_POS = (0, -0.487)
 STATUS_COLOR = 'lightgray'
 STATUS_NAME_CHARS = 34            # filename budget before truncation
 
+# The readout. Line 5 wraps onto a line 6 rather than run off a narrow screen
+# (the font never shrinks). Char width and line pitch were measured from
+# rendered Consolas in PsychoPy; a wrapped HUD moves up half a pitch so its
+# bottom edge stays clear of the status bar.
+HUD_HEIGHT = 0.018
+HUD_POS_Y = -0.42
+HUD_WRAP_W = 1.8
+HUD_CHAR_W = 0.514 * HUD_HEIGHT
+HUD_LINE_PITCH = 0.0204
+
 MENU_HEIGHT = 0.021
 MENU_BOX_W_FRAC = 0.72            # of screen width
 MENU_BOX_H_FRAC = 0.62            # of screen height -- about 60% centred
@@ -269,6 +279,16 @@ STEP_PHASE = 0.05
 STEP_SD = 0.01
 STEP_RGB = 0.001
 STEP_ALPHA = 0.01
+STEP_ROT = 5.0
+
+# Discrete parameters. Their knobs are kind 'choice': delta steps through the
+# list, wrapping. Mask 'none' is stored as a string so it round-trips through
+# JSON and presets, and becomes None only at the GratingStim.
+CHOICES = {
+    'waveform': ['sin', 'sqr', 'saw'],
+    'mask': ['none', 'circle'],
+    'shape': ['rect', 'circle'],
+}
 
 _GRATING_KNOBS = {
     'z': ('sf', +STEP_SF, 0.5, 50.0, 'float'),
@@ -291,7 +311,12 @@ STIM_KNOBS = {
         'd': ('envelope_sd', +STEP_SD, 0.01, 1.0, 'float'),
         'a': ('envelope_sd', -STEP_SD, 0.01, 1.0, 'float'),
     }),
-    STIM_GRATING: dict(_GRATING_KNOBS),       # same, minus the envelope
+    # Gabor's D/A envelope pair becomes waveform here; B toggles the mask.
+    STIM_GRATING: dict(_GRATING_KNOBS, **{
+        'd': ('waveform', +1, None, None, 'choice'),
+        'a': ('waveform', -1, None, None, 'choice'),
+        'b': ('mask', +1, None, None, 'choice'),
+    }),
     STIM_UNIFORM: {
         'r': ('r', +STEP_RGB, -1.0, 1.0, 'float'),
         't': ('r', -STEP_RGB, -1.0, 1.0, 'float'),
@@ -301,10 +326,13 @@ STIM_KNOBS = {
         'a': ('b', -STEP_RGB, -1.0, 1.0, 'float'),
         'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
         'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
+        'b': ('shape', +1, None, None, 'choice'),
     },
     STIM_CUSTOM_PNG: {
         'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
         'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
+        'r': ('rotation_deg', +STEP_ROT, 0.0, 360.0, 'wrap'),
+        't': ('rotation_deg', -STEP_ROT, 0.0, 360.0, 'wrap'),
     },
     # Text reuses the uniform patch's colour keys exactly; string cycling gets
     # its own [B]/[N] rather than overloading [R/T].
@@ -567,6 +595,11 @@ def apply_knob(state, key, table):
     if spec is None:
         return False
     field, delta, low, high, kind = spec
+    if kind == 'choice':
+        options = CHOICES[field]
+        state[field] = options[
+            (options.index(state[field]) + delta) % len(options)]
+        return True
     value = state[field] + delta
     if kind == 'wrap':
         # Orientation is cyclic: 355 + 5 is 0, not a clamp at 360.
@@ -673,16 +706,20 @@ def default_state(stimulus_type):
         'ori': 0.0,
         'phase': 0.5,
         'envelope_sd': 0.06,
+        'waveform': 'sin',        # grating only (PRD 4.3)
+        'mask': 'none',
 
         # Uniform patch (PRD 4.4)
         'r': channel_default,
         'g': channel_default,
         'b': channel_default,
         'alpha': 1.0,
+        'shape': 'rect',          # also the spatial uniformity patch's
 
         # Custom PNG (PRD 4.5). Resolved at startup; GENERATED_LABEL when the
         # fallback pattern is in use.
         'image_path': GENERATED_LABEL,
+        'rotation_deg': 0.0,
 
         # Text stimulus (PRD 4.6)
         'text_string': TEXT_PRESETS[0],
@@ -754,6 +791,36 @@ def gauss_sd_param(size, envelope_sd):
     """
     radius = max(size, 1e-6) / 2.0
     return radius / max(envelope_sd, 1e-6)
+
+
+def grating_mask(state):
+    """GratingStim mask for the grating type: 'none' is stored, None is used."""
+    return None if state['mask'] == 'none' else state['mask']
+
+
+def make_patch(win, state, shape):
+    """PRD 4.4 uniform patch: a rect, or a circle whose DIAMETER is size.
+
+    The circle is a ShapeStim like the rect -- same fill path, same colour
+    space -- not a masked GratingStim, so the two render identical colour.
+    """
+    common = dict(fillColor=[state['r'], state['g'], state['b']],
+                  lineWidth=0, lineColor=None, colorSpace='rgb',
+                  opacity=state['alpha'], contrast=state['contrast'],
+                  pos=(state['x_pos'], state['y_pos']), autoLog=False)
+    if shape == 'circle':
+        return visual.Circle(win=win, radius=state['size'] / 2.0, edges=256,
+                             **common)
+    return visual.Rect(win=win, width=state['size'], height=state['size'],
+                       **common)
+
+
+def size_patch(patch, size):
+    if isinstance(patch, visual.Circle):
+        patch.radius = size / 2.0
+    else:
+        patch.width = size
+        patch.height = size
 
 
 def radial_cycles_for(state):
@@ -906,6 +973,7 @@ WORKFLOWS = {
         "4. Sweep contrast [C/V], snapshot [S] at each step.",
         "",
         "KNOBS: [Z/X] SF   [R/T] orientation   [E/W] phase",
+        "       [D/A] waveform sin/sqr/saw   [B] circular mask",
         "       plus the universal knobs.",
     ],
     STIM_UNIFORM: [
@@ -918,7 +986,7 @@ WORKFLOWS = {
         "4. Gamma steps [G] for the 11-level luminance ramp.",
         "",
         "KNOBS: [R/T] red   [E/W] green   [D/A] blue   [Z/X] alpha",
-        "       plus the universal knobs.",
+        "       [B] rect/circle   plus the universal knobs.",
     ],
     STIM_TEXT: [
         "1. Cycle preset strings with [B]/[N].",
@@ -943,7 +1011,7 @@ WORKFLOWS = {
         "   not a display one.",
         "4. Snapshot [S] -- the full path is recorded with it.",
         "",
-        "KNOBS: [Z/X] alpha   plus the universal knobs.",
+        "KNOBS: [Z/X] alpha   [R/T] rotation   plus the universal knobs.",
         "Pass a file with:  python monical.py --image path.png",
     ],
 }
@@ -1115,10 +1183,14 @@ def stim_line(state, sweep=None):
             line += ' | SD: {:.3f} (mask sd {:.2f})'.format(
                 state['envelope_sd'],
                 gauss_sd_param(state['size'], state['envelope_sd']))
+        else:
+            line += ' | Wave: {} | Mask: {}'.format(state['waveform'],
+                                                   state['mask'])
         return line
     if stim_type == STIM_UNIFORM:
-        return 'R: {:.3f} | G: {:.3f} | B: {:.3f} | Alpha: {:.3f}'.format(
-            state['r'], state['g'], state['b'], state['alpha'])
+        return ('R: {:.3f} | G: {:.3f} | B: {:.3f} | Alpha: {:.3f} | '
+                'Shape: {}').format(state['r'], state['g'], state['b'],
+                                    state['alpha'], state['shape'])
     if stim_type == STIM_TEXT:
         return ("Text: '{}' | R: {:.3f} | G: {:.3f} | B: {:.3f} | "
                 "Alpha: {:.3f}").format(
@@ -1126,8 +1198,9 @@ def stim_line(state, sweep=None):
                     state['b'], state['alpha'])
     if stim_type == STIM_CUSTOM_PNG:
         # Filename only; the full path goes in the snapshot (PRD 8).
-        return 'File: {} | Alpha: {:.3f}'.format(
-            os.path.basename(state['image_path']), state['alpha'])
+        return 'File: {} | Alpha: {:.3f} | Rot: {:g} deg'.format(
+            os.path.basename(state['image_path']), state['alpha'],
+            state['rotation_deg'])
     return 'No stimulus-specific parameters'
 
 
@@ -1153,9 +1226,11 @@ def build_status_bar(state, out_name=''):
 MENU_STIM_KEYS = {
     STIM_RADIAL: 'Z/X = Rings | R/T = Wedges (+/-2)',
     STIM_GABOR: 'Z/X = SF | R/T = Orientation | E/W = Phase | D/A = Env SD',
-    STIM_GRATING: 'Z/X = SF | R/T = Orientation | E/W = Phase',
-    STIM_UNIFORM: 'R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha',
-    STIM_CUSTOM_PNG: 'Z/X = Alpha',
+    STIM_GRATING: ('Z/X = SF | R/T = Orientation | E/W = Phase | '
+                   'D/A = Waveform | B = Mask'),
+    STIM_UNIFORM: ('R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha | '
+                   'B = Shape'),
+    STIM_CUSTOM_PNG: 'Z/X = Alpha | R/T = Rotation',
     STIM_TEXT: ('B/N = Cycle string | R/T = Red | E/W = Green | '
                 'D/A = Blue | Z/X = Alpha'),
 }
@@ -1184,6 +1259,26 @@ def build_menu_text(state):
         lines += ['', 'UNIFORMITY MODE: ARROWS = move patch across the grid']
     lines += ['', '[M] or [ESC] to dismiss']
     return '\n'.join(lines)
+
+
+def hud_line_chars(state):
+    """Characters that fit on one readout line on this screen."""
+    width = min(state['aspect'] * 0.96, HUD_WRAP_W)
+    return int(width / HUD_CHAR_W)
+
+
+def wrap_hud_line(line, max_chars):
+    """[line], or the line split in two at the last ' | ' that fits."""
+    if len(line) <= max_chars:
+        return [line]
+    cut = line.rfind(' | ', 0, max_chars)
+    if cut <= 0:
+        # First field alone is too long (a long filename): still move the
+        # rest down rather than push it further off screen.
+        cut = line.find(' | ')
+        if cut < 0:
+            return [line]
+    return [line[:cut], line[cut + 3:]]
 
 
 def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
@@ -1227,8 +1322,7 @@ def build_hud(state, resolution, refresh_hz, live_hz, screen_height_cm,
             px_size, _deg(size_deg), _deg(ecc_deg)),
         'BG: {:.3f} | Contrast: {:.3f} | {}'.format(
             state['bg_gray'], state['contrast'], freq_text),
-        stim_line(state, sweep),
-    ])
+    ] + wrap_hud_line(stim_line(state, sweep), hud_line_chars(state)))
 
 
 # =============================================================================
@@ -1259,6 +1353,8 @@ def stimulus_specific(state):
             'sf': round(state['sf'], STORE_DP),
             'ori': round(state['ori'], STORE_DP),
             'phase': round(state['phase'], STORE_DP),
+            'waveform': state['waveform'],
+            'mask': state['mask'],
         }
     elif stim_type == STIM_TEXT:
         record = {
@@ -1275,11 +1371,13 @@ def stimulus_specific(state):
             'g': round(state['g'], STORE_DP),
             'b': round(state['b'], STORE_DP),
             'alpha': round(state['alpha'], STORE_DP),
+            'shape': state['shape'],
         }
     elif stim_type == STIM_CUSTOM_PNG:
         record = {
             'filepath': state['image_path'],
             'alpha': round(state['alpha'], STORE_DP),
+            'rotation_deg': round(state['rotation_deg'], STORE_DP),
         }
     else:
         record = {}
@@ -1304,6 +1402,7 @@ def stimulus_specific(state):
             record['patch_g'] = round(state['g'], STORE_DP)
             record['patch_b'] = round(state['b'], STORE_DP)
             record['patch_alpha'] = round(state['alpha'], STORE_DP)
+            record['patch_shape'] = state['shape']
 
     return record
 
@@ -1550,10 +1649,11 @@ def load_preset(path):
 
 
 def param_ranges():
-    """field -> (low, high, kind) for every numeric parameter.
+    """field -> (low, high, kind) for every knob-driven parameter.
 
     Built from the knob tables, so a range is still defined in one place, plus
-    the two mode-local indices that a preset also carries.
+    the two mode-local indices that a preset also carries. 'choice' fields
+    have no range; their valid values are CHOICES.
     """
     ranges = {}
     for table in [KNOBS] + list(STIM_KNOBS.values()):
@@ -1570,6 +1670,10 @@ EVEN_FIELDS = ('wedges',)         # an odd count would leave a half-cycle seam
 def sanitize_param(field, value, default, ranges):
     """`value` forced into the field's range. Returns (value, reason or '')."""
     low, high, kind = ranges[field]
+    if kind == 'choice':
+        if value in CHOICES[field]:
+            return value, ''
+        return default, 'not one of {}, default used'.format(CHOICES[field])
     if (isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value)):
         return default, 'not a number, default used'
@@ -1733,7 +1837,8 @@ def main(argv=None):
     elif stimulus_type in (STIM_GABOR, STIM_GRATING):
         is_gabor = stimulus_type == STIM_GABOR
         stim = visual.GratingStim(
-            win=win, tex='sin', mask='gauss' if is_gabor else None,
+            win=win, tex='sin' if is_gabor else state['waveform'],
+            mask='gauss' if is_gabor else grating_mask(state),
             size=state['size'], sf=state['sf'], ori=state['ori'],
             phase=state['phase'], contrast=state['contrast'],
             pos=(state['x_pos'], state['y_pos']),
@@ -1751,15 +1856,14 @@ def main(argv=None):
             contrast=state['contrast'],
             pos=(state['x_pos'], state['y_pos']), autoLog=False)
     elif stimulus_type == STIM_UNIFORM:
-        stim = visual.Rect(
-            win=win, width=state['size'], height=state['size'],
-            fillColor=[state['r'], state['g'], state['b']],
-            lineWidth=0, lineColor=None, colorSpace='rgb',
-            opacity=state['alpha'], contrast=state['contrast'],
-            pos=(state['x_pos'], state['y_pos']), autoLog=False)
+        # Both shapes exist from the start; [B] only changes which is drawn.
+        uniform_patches = {shape: make_patch(win, state, shape)
+                           for shape in CHOICES['shape']}
+        stim = uniform_patches[state['shape']]
     elif stimulus_type == STIM_CUSTOM_PNG:
         stim = visual.ImageStim(
             win=win, image=image, size=state['size'],
+            ori=state['rotation_deg'],
             contrast=state['contrast'], opacity=state['alpha'],
             pos=(state['x_pos'], state['y_pos']), autoLog=False)
 
@@ -1778,17 +1882,14 @@ def main(argv=None):
         colorSpace='rgb', autoLog=False)
 
     # PRD 6.4 renders the uniform patch regardless of the selected type, so
-    # this one exists even when the session is running a Gabor.
-    uniformity_patch = visual.Rect(
-        win=win, width=state['size'], height=state['size'], pos=(0, 0),
-        lineWidth=0, lineColor=None,
-        fillColor=[state['r'], state['g'], state['b']],
-        colorSpace='rgb', opacity=state['alpha'],
-        contrast=state['contrast'], autoLog=False)
+    # these exist even when the session is running a Gabor. It takes the
+    # current shape; gamma steps above stays a full-screen rect regardless.
+    uniformity_patches = {shape: make_patch(win, state, shape)
+                          for shape in CHOICES['shape']}
 
     hud = visual.TextStim(
-        win, text='', font=READOUT_FONT, height=0.018, color='white',
-        pos=(0, -0.42), wrapWidth=1.8, alignText='center',
+        win, text='', font=READOUT_FONT, height=HUD_HEIGHT, color='white',
+        pos=(0, HUD_POS_Y), wrapWidth=HUD_WRAP_W, alignText='center',
         anchorHoriz='center', autoLog=False)
 
     # PRD 8.2: always drawn, dimmer and smaller than the HUD so the two do
@@ -1838,6 +1939,8 @@ def main(argv=None):
     # Rebuilding the Gaussian mask uploads a 256x256 texture, so it happens
     # only when the SD or the size it is relative to actually changes.
     mask_cache = [None]
+    # Same for the grating's waveform and mask: what the stim was built with.
+    grating_cache = {'tex': state['waveform'], 'mask': state['mask']}
 
     # ---- Auto-repeat plumbing (PRD 5.1) --------------------------------------
     # KeyStateHandler only observes events, so it coexists with PsychoPy's own
@@ -2003,12 +2106,14 @@ def main(argv=None):
         # ---- Live parameter application --------------------------------------
         win.color = [state['bg_gray']] * 3
 
+        if stimulus_type == STIM_UNIFORM:
+            stim = uniform_patches[state['shape']]
+
         if stim is not None:
             stim.pos = (state['x_pos'], state['y_pos'])
             stim.contrast = state['contrast']
             if stimulus_type == STIM_UNIFORM:
-                stim.width = state['size']
-                stim.height = state['size']
+                size_patch(stim, state['size'])
                 stim.fillColor = [state['r'], state['g'], state['b']]
                 stim.opacity = state['alpha']
             elif stimulus_type == STIM_TEXT:
@@ -2031,8 +2136,16 @@ def main(argv=None):
                     # rebuilds the texture -- so only do it when sd moves.
                     stim.maskParams = {'sd': sd}
                     mask_cache[0] = sd
+            if stimulus_type == STIM_GRATING:
+                # tex and mask setters rebuild textures, so only on change.
+                if state['waveform'] != grating_cache['tex']:
+                    stim.tex = grating_cache['tex'] = state['waveform']
+                if state['mask'] != grating_cache['mask']:
+                    stim.mask = grating_mask(state)
+                    grating_cache['mask'] = state['mask']
             if stimulus_type == STIM_CUSTOM_PNG:
                 stim.opacity = state['alpha']
+                stim.ori = state['rotation_deg']
             if stimulus_type == STIM_RADIAL:
                 # The setters rebuild the texture coords, so only on change.
                 radial_cycles, angular_cycles = radial_cycles_for(state)
@@ -2052,8 +2165,8 @@ def main(argv=None):
             gamma_patch.draw()
         elif mode == MODE_UNIFORMITY:
             name = UNIFORMITY_GRID[state['uniformity_grid_index']]
-            uniformity_patch.width = state['size']
-            uniformity_patch.height = state['size']
+            uniformity_patch = uniformity_patches[state['shape']]
+            size_patch(uniformity_patch, state['size'])
             uniformity_patch.pos = uniformity_xy(name, state['aspect'],
                                                  state['size'])
             uniformity_patch.fillColor = [state['r'], state['g'], state['b']]
@@ -2087,6 +2200,8 @@ def main(argv=None):
                                  sd_ms=rolling_sd_ms, drops=dropped_frames,
                                  sweep=sweep,
                                  out_name=os.path.basename(out_path))
+            extra = hud.text.count('\n') - 4
+            hud.pos = (0, HUD_POS_Y + max(0, extra) * HUD_LINE_PITCH / 2.0)
             hud.draw()
 
         # Always drawn, whatever [H] says (PRD 8.2).

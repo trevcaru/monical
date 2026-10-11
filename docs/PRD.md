@@ -202,22 +202,47 @@ Full-field or sized grating without Gaussian envelope. Used for contrast sensiti
 
 **Construction:**
 ```python
-GratingStim(win=win, tex='sin', mask=None,
+GratingStim(win=win, tex=waveform, mask=None if mask == 'none' else mask,
             size=size, sf=sf, ori=ori, phase=phase,
             contrast=contrast, pos=(x, y), autoLog=False)
 ```
 
-**Stimulus-specific parameters:** Same as Gabor minus envelope SD.
+`waveform` is PsychoPy's built-in `'sin'`, `'sqr'` or `'saw'` texture. `mask` is `'none'` (a square patch) or PsychoPy's hard-edged `'circle'`. `'none'` is stored as a string so it survives JSON and presets, and is passed to GratingStim as `None`.
+
+**Stimulus-specific parameters:**
+
+| Param | Key | Increment | Default | Range |
+|-------|-----|-----------|---------|-------|
+| Spatial frequency | `[Z/X]` | ±0.5 cycles | 4.0 | 0.5–50.0 |
+| Orientation | `[R/T]` | ±5° | 0.0 | 0–360 |
+| Phase | `[E/W]` | ±0.05 | 0.5 | 0.0–1.0 |
+| Waveform | `[D/A]` | next / previous | `sin` | `sin`, `sqr`, `saw` (wraps) |
+| Mask | `[B]` | toggle | `none` | `none`, `circle` |
+
+Waveform and mask are single-press. `[N]` is unbound for this type. In gamma mode `[A]` is claimed by the auto sweep (§6.5), as it is for every type.
+
+**Stimulus-specific snapshot fields:** `sf`, `ori`, `phase`, `waveform`, `mask`.
 
 ### 4.4 Uniform patch
 
-Solid rectangle at adjustable color. The color calibration surface. Use for gamma per-channel, channel independence, spatial uniformity, and any measurement requiring a uniform field.
+Solid rectangle or circle at adjustable color. The color calibration surface. Use for gamma per-channel, channel independence, spatial uniformity, and any measurement requiring a uniform field.
 
 **Construction:**
 ```python
-Rect(win=win, width=w, height=h, fillColor=[r, g, b],
-     opacity=alpha, pos=(x, y), autoLog=False)
+# shape 'rect'
+Rect(win=win, width=size, height=size, fillColor=[r, g, b],
+     lineWidth=0, lineColor=None, colorSpace='rgb',
+     opacity=alpha, contrast=contrast, pos=(x, y), autoLog=False)
+
+# shape 'circle' -- diameter is the size value
+Circle(win=win, radius=size / 2, edges=256, fillColor=[r, g, b],
+       lineWidth=0, lineColor=None, colorSpace='rgb',
+       opacity=alpha, contrast=contrast, pos=(x, y), autoLog=False)
 ```
+
+The circle is a ShapeStim fill, the same render path as the rect. It is not a masked GratingStim, whose texture and mask stages could change the colour. Dual stimulus (§6.3) and spatial uniformity (§6.4) draw the current shape. Gamma steps (§6.2) is always the full-screen rect.
+
+**Colour equivalence (measured).** Rect and circle were rendered offscreen at the same parameters, and a central 100×100 px region well inside both shapes was compared. They were identical (0 differing pixels) in every case: mid-gray on a −0.5 background, near-black −0.95, pure red, pure green, pure blue, green at alpha 0.5 over a 0.3 background, and 0.4 gray at contrast 0.5 over −0.2. The circle at size 0.225 measures 242 px across on a 1080-px-tall window (0.225 × 1080 = 243).
 
 **Stimulus-specific parameters:**
 
@@ -227,6 +252,9 @@ Rect(win=win, width=w, height=h, fillColor=[r, g, b],
 | Green | `[E/W]` | ±0.001 | 0.0 | -1.0–1.0 |
 | Blue | `[D/A]` | ±0.001 | 0.0 | -1.0–1.0 |
 | Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 |
+| Shape | `[B]` | toggle | `rect` | `rect`, `circle` |
+
+Shape is single-press. `[N]` is unbound for this type.
 
 Note: PsychoPy color range is -1 to 1. Mid-gray = 0. Black = -1. White = 1.
 
@@ -236,7 +264,7 @@ User-supplied texture loaded from a PNG file. For calibrating with experiment-sp
 
 **Construction:**
 ```python
-ImageStim(win=win, image=filepath, size=size,
+ImageStim(win=win, image=filepath, size=size, ori=rotation_deg,
           contrast=contrast, opacity=alpha,
           pos=(x, y), autoLog=False)
 ```
@@ -256,10 +284,13 @@ The path is stored in state and written to snapshots for reproducibility. If the
 | Param | Key | Increment | Default | Range |
 |-------|-----|-----------|---------|-------|
 | Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 |
+| Rotation | `[R/T]` | ±5° | 0 | 0–360, wraps (355 + 5 = 0, 0 − 5 = 355) |
+
+Rotation is single-press and sets ImageStim `ori` (clockwise, PsychoPy's convention).
 
 All universal parameters apply: position, size, contrast, background, flicker, viewing distance.
 
-**Stimulus-specific snapshot fields:** `{"filepath": "...", "alpha": 1.0}`
+**Stimulus-specific snapshot fields:** `{"filepath": "...", "alpha": 1.0, "rotation_deg": 0.0}`
 
 ### 4.6 Text stimulus
 
@@ -439,6 +470,8 @@ Line 4: BG: [val] | Contrast: [val] | Freq: [realized] Hz ([frames] frames, [dut
 Line 5: [stimulus-specific params, e.g. SF: 4.0 | Ori: 0 | Phase: 0.50]
 ```
 
+If line 5 is wider than the screen (a long `--text` string or PNG filename), it wraps at a ` | ` boundary onto a line 6. The font never shrinks. A wrapped readout moves up half a line so its bottom edge stays clear of the status bar.
+
 Duty cycle is `(frames // 2) / frames`, the same split `stim_is_on` uses. Only an even frame count can give 50%; an odd one puts the shorter half ON, so 3 frames reads `33% duty`. In a non-flicker mode the field is marked `idle` and shows what the standing custom setting would produce.
 
 Line 3 carries pixel coordinates beside the height units, derived from the window:
@@ -505,7 +538,7 @@ The `THIS STIMULUS` block changes with the selected type, and gamma steps and sp
 Line 5 for `custom_png` shows:
 
 ```
-File: [filename] | Alpha: [a:.3f]
+File: [filename] | Alpha: [a:.3f] | Rot: [deg] deg
 ```
 
 Filename only, not the full path — the path can be arbitrarily long and Line 5 is a single readout line. The full path is recorded in the snapshot.
