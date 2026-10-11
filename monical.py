@@ -840,6 +840,17 @@ def pyglet_key_name(symbol):
     return 'return' if name == 'enter' else name
 
 
+def new_presses(keys, held_since):
+    """The press events in `keys` that are real presses.
+
+    A press for a key already held is never a new press, whatever the key.
+    pyglet 1.4 already drops OS autorepeat on Windows; this keeps it true on
+    any backend that does not. The only repeat is repeat_tick, for the
+    repeat-enabled knobs.
+    """
+    return [key for key in keys if key not in held_since]
+
+
 def repeat_tick(state, table, repeat_names, down, held_since, repeat_count,
                 now, sweeping=False):
     """One frame of held-key tracking and hold-to-repeat.
@@ -3293,13 +3304,7 @@ def main(argv=None):
     running = True
     while running:
         # ---- Input -----------------------------------------------------------
-        for key in event.getKeys():
-            # A press for a key already held is never a new press, whatever
-            # the key. pyglet 1.4 already drops OS autorepeat on Windows; this
-            # keeps it true on any backend that does not. The only repeat is
-            # repeat_tick, for the repeat-enabled knobs.
-            if key in held_since:
-                continue
+        for key in new_presses(event.getKeys(), held_since):
             # Precedence lives in key_claim, shared with the repeat loop.
             claim = key_claim(state, key, sweep is not None)
 

@@ -175,7 +175,20 @@ Nothing reads this file back. You transcribe the values into your experiment by 
 
 - [docs/MANUAL.md](docs/MANUAL.md) — operating manual: full keybindings, nine step-by-step workflows, output reference, troubleshooting.
 - [docs/PRD.md](docs/PRD.md) — design authority: what each stimulus is, why, and the exact construction.
-- [docs/VERIFICATION.md](docs/VERIFICATION.md) — verification protocol: confirm the readout and JSON match what the display is physically doing.
+- [docs/VERIFICATION.md](docs/VERIFICATION.md) — what the automated tests cover, and the photometer and oscilloscope protocol that confirms the readout and JSON match what the display is physically doing.
+
+## Running tests
+
+```bash
+python -m unittest discover tests
+```
+
+Standard-library `unittest`, nothing to install beyond PsychoPy.
+
+- `tests/test_logic.py` (55 tests, under a second) needs no window and runs headless anywhere PsychoPy imports: flicker frame arithmetic, the multi-stimulus ring, per-copy states, key dispatch and hold-to-repeat, preset sanitizing and migration, the `--text` cycle, and the output files.
+- `tests/test_render.py` (16 tests, about 40 s) draws into a hidden PsychoPy window and compares pixels: the radial checkerboard against the original construction, rect/circle colour equivalence, text layout, off-screen flags against real clipping, the selection marker, the readout and intro layout, and a frame of every stimulus type at its defaults and range extremes. It needs a display with OpenGL. Without one, the module is skipped with the reason; set `MONICAL_SKIP_RENDER=1` to skip it on purpose.
+
+The tests check the software. Whether your display shows what was drawn is what [docs/VERIFICATION.md](docs/VERIFICATION.md) is for.
 
 ## What it is not
 

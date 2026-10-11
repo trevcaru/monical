@@ -3,7 +3,63 @@
 Confirm that Monical's on-screen readout and JSON output match what the display
 is physically doing.
 
+There are three layers, and they answer different questions:
+
+| Layer | Run | Answers |
+|---|---|---|
+| Automated tests | `python -m unittest discover tests` | Does the software compute and draw what it says? |
+| Frame-timing benchmark | `python monical.py --bench` | Can this machine hold every frame at each copy count? (MANUAL §5i) |
+| This protocol | photometer, photodiode + scope, by hand | Does this display emit what was drawn? |
+
 ---
+
+## Automated tests
+
+Run them after any change to `monical.py`, on any machine. They need PsychoPy
+only; `tests/test_render.py` also needs a display with OpenGL and skips itself
+cleanly without one (or with `MONICAL_SKIP_RENDER=1`).
+
+**`tests/test_logic.py`** — no window:
+
+- Flicker: the `stim_is_on` formula for every count from 2 to 240, whole-frame
+  stepping with no dead presses at 60, 144 and 240 Hz, the on/off split and
+  `ASYM` marking.
+- Multi-stimulus ring: geometry, N = 2 at offset 0 equal to the legacy dual
+  positions for every reachable X, N = 16 spacing, offset wrap, the overlap
+  threshold, off-screen flags and per-copy eccentricity.
+- Per-copy states: flicker / steady / off draw sequences over two LCM cycles.
+- Input: dispatch precedence (`key_claim`), 60 increments per second after the
+  1 s hold delay at any frame cadence, held-key press dropping, gamma-mode `A`
+  leaving blue alone.
+- Frame timing: the 1.5x rolling-median drop rule.
+- Presets: clamping, even wedges, junk and NaN values, old-format migrations,
+  refresh-mismatch conversion, text restored by string, length mismatches.
+- Output: no absolute paths in the session header, `--image` fallback,
+  screen text, the snapshot record.
+
+**`tests/test_render.py`** — hidden window, pixel comparisons:
+
+- The default radial checkerboard against the original v1 construction
+  (0 differing pixels) and N equal-width rings for N = 1–20.
+- Rect and circle colour equivalence; circle diameter.
+- Text: fast path against per-glyph, per-glyph against a single `TextStim`,
+  rigid rotation, missing-font fallback.
+- Off-screen flags against real clipping; the selection marker never touching
+  a copy, and hidden with the readout.
+- The per-line readout against the former single block; the intro screen
+  fitting at 4:3 and 16:9.
+- One frame of every stimulus type in every mode, at defaults and at range
+  extremes.
+
+What the tests cannot tell you is whether the panel shows what was drawn: its
+luminance, gamma, timing and uniformity. That is the rest of this document.
+
+---
+
+## Manual protocol (photometer and oscilloscope)
+
+Run this on each rig, with the experiment display, before relying on its
+measurements: equipment, preparation, then seven checks.
 
 ## Equipment Needed
 
