@@ -24,6 +24,7 @@ Stimuli, parameter knobs, modes, and the HUD are not implemented yet.
 import os
 import sys
 import json
+import math
 import argparse
 import datetime
 import collections
@@ -577,9 +578,23 @@ def apply_knob(state, key, table):
     return True
 
 
-def repeat_tick(state, table, names, is_down, held_since, repeat_count, now,
-                sweeping=False):
-    """One frame of hold-to-repeat for the repeat-enabled keys in `names`.
+def pyglet_key_name(symbol):
+    """The name event.getKeys() reports for a pyglet symbol.
+
+    Mirrors psychopy.event._onPygletKey, so held-key tracking and the press
+    events it filters agree on what a key is called.
+    """
+    name = pyglet_key.symbol_string(symbol).lower().lstrip('_')
+    return 'return' if name == 'enter' else name
+
+
+def repeat_tick(state, table, repeat_names, down, held_since, repeat_count,
+                now, sweeping=False):
+    """One frame of held-key tracking and hold-to-repeat.
+
+    `down` is every key name currently held. held_since tracks ALL of them --
+    the press loop drops any press event for a key already in it -- but only
+    `repeat_names` ever step here.
 
     The count due is derived from how long the key has been down, NOT from the
     time since the last increment. Those differ: an increment can only be
@@ -588,16 +603,22 @@ def repeat_tick(state, table, names, is_down, held_since, repeat_count, now,
     Measuring against the hold start lets a short interval make up for a long
     one, so the average holds at exactly REPEAT_RATE_HZ on any panel.
     """
-    for name in names:
-        # A key the dispatcher claims ahead of the knob table is never a knob
-        # right now, held or not -- see key_claim.
-        if not is_down(name) or key_claim(state, name, sweeping) is not None:
-            held_since.pop(name, None)
+    for name in list(held_since):
+        if name not in down:
+            held_since.pop(name)
             repeat_count.pop(name, None)
-            continue
+    for name in down:
         if name not in held_since:
-            # First frame down. The press path already applied the initial
-            # increment; just start the hold timer.
+            # First frame down. The press path already acted on it; just
+            # start the hold timer.
+            held_since[name] = now
+            repeat_count[name] = 0
+            continue
+        if name not in repeat_names:
+            continue
+        if key_claim(state, name, sweeping) is not None:
+            # Claimed ahead of the knob table, so not a knob right now. The
+            # timer restarts, so it repeats only after a full delay unclaimed.
             held_since[name] = now
             repeat_count[name] = 0
             continue
@@ -1528,18 +1549,69 @@ def load_preset(path):
     return loaded
 
 
+def param_ranges():
+    """field -> (low, high, kind) for every numeric parameter.
+
+    Built from the knob tables, so a range is still defined in one place, plus
+    the two mode-local indices that a preset also carries.
+    """
+    ranges = {}
+    for table in [KNOBS] + list(STIM_KNOBS.values()):
+        for field, _delta, low, high, kind in table.values():
+            ranges[field] = (low, high, kind)
+    ranges['gamma_step_index'] = (0, len(GAMMA_LEVELS) - 1, 'int')
+    ranges['uniformity_grid_index'] = (0, len(UNIFORMITY_GRID) - 1, 'int')
+    return ranges
+
+
+EVEN_FIELDS = ('wedges',)         # an odd count would leave a half-cycle seam
+
+
+def sanitize_param(field, value, default, ranges):
+    """`value` forced into the field's range. Returns (value, reason or '')."""
+    low, high, kind = ranges[field]
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value)):
+        return default, 'not a number, default used'
+    if kind == 'wrap':
+        fixed, reason = round(value % high, STORE_DP), 'wrapped into 0-{}'
+        reason = reason.format(high)
+    elif field in EVEN_FIELDS:
+        # Half up, so every odd count moves the same way: 7 -> 8, not 6.
+        fixed = int(clamp(2 * math.floor(value / 2.0 + 0.5), low, high))
+        reason = 'rounded to even, range {}-{}'.format(low, high)
+    elif kind == 'int':
+        fixed = int(clamp(math.floor(value + 0.5), low, high))
+        reason = 'whole number, range {}-{}'.format(low, high)
+    else:
+        fixed = clamp(value, low, high)
+        reason = 'range {}-{}'.format(low, high)
+    return fixed, ('' if fixed == value else reason)
+
+
 def apply_preset(state, loaded):
     """Overlay a preset onto a default state. Returns the keys applied.
 
     Forward and backward compatible on purpose: keys the preset omits keep
     their defaults, and keys it carries that this version no longer has are
     ignored. Neither case is an error -- presets outlive tool versions.
+
+    Numeric values are forced into range, one console line per correction. A
+    preset is a hand-editable file, and an out-of-range value would otherwise
+    reach the stimulus constructor unchecked.
     """
+    ranges = param_ranges()
     applied, ignored = [], []
     for key, value in loaded.items():
         if key in PRESET_EXCLUDE or key not in state:
             ignored.append(key)
             continue
+        if key in ranges:
+            fixed, reason = sanitize_param(key, value, state[key], ranges)
+            if reason:
+                print("Preset: {} {!r} -> {!r} ({})".format(
+                    key, value, fixed, reason))
+            value = fixed
         state[key] = value
         applied.append(key)
     if ignored:
@@ -1780,14 +1852,8 @@ def main(argv=None):
             print("Hold-to-repeat unavailable ({}). Single presses still work."
                   .format(err))
 
-    repeat_symbols = {}
-    if key_state is not None:
-        for name in repeat_key_names(stimulus_type):
-            symbol = getattr(pyglet_key, name.upper(), None)
-            if symbol is not None:
-                repeat_symbols[name] = symbol
-
-    held_since = {}          # key name -> time it went down
+    repeat_names = repeat_key_names(stimulus_type)
+    held_since = {}          # key name -> time it went down, for EVERY held key
     repeat_count = {}        # key name -> increments emitted so far this hold
     repeat_clock = core.Clock()
 
@@ -1804,22 +1870,17 @@ def main(argv=None):
     rolling_hz, rolling_sd_ms = measured_refresh, None
     divergence_warned = False
 
-    def is_os_autorepeat(name):
-        """True when this key is already tracked as held.
-
-        Windows generates its own auto-repeat key events while a key is down,
-        and PsychoPy delivers them through event.getKeys() exactly like real
-        presses. Without this guard a held key would advance at the OS repeat
-        rate AND at our clock-driven rate simultaneously. Only the first press
-        of a hold gets through here; the rest are ours to time.
-        """
-        return name in held_since
-
     # ---- Main loop -----------------------------------------------------------
     running = True
     while running:
         # ---- Input -----------------------------------------------------------
         for key in event.getKeys():
+            # A press for a key already held is never a new press, whatever
+            # the key. pyglet 1.4 already drops OS autorepeat on Windows; this
+            # keeps it true on any backend that does not. The only repeat is
+            # repeat_tick, for the repeat-enabled knobs.
+            if key in held_since:
+                continue
             # Precedence lives in key_claim, shared with the repeat loop.
             claim = key_claim(state, key, sweep is not None)
 
@@ -1905,10 +1966,6 @@ def main(argv=None):
                 continue
 
             if key in table:
-                # Repeat-enabled knobs swallow the OS's own repeat events; the
-                # clock below is the only thing allowed to advance them.
-                if key in repeat_symbols and is_os_autorepeat(key):
-                    continue
                 apply_knob(state, key, table)
             elif key == 's':
                 count = take_snapshot()
@@ -1923,8 +1980,9 @@ def main(argv=None):
 
         # ---- Hold-to-repeat (PRD 5.1) ----------------------------------------
         if key_state is not None:
-            repeat_tick(state, table, repeat_symbols,
-                        lambda name: key_state[repeat_symbols[name]],
+            down = {pyglet_key_name(symbol)
+                    for symbol, is_down in key_state.items() if is_down}
+            repeat_tick(state, table, repeat_names, down,
                         held_since, repeat_count, repeat_clock.getTime(),
                         sweeping=sweep is not None)
 

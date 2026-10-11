@@ -117,6 +117,10 @@ run at ~60 increments per second. On a 60 Hz panel that is one step per frame,
 which is the ceiling — expect slightly under 60/s there. On a 240 Hz panel it
 is one step every four frames.
 
+Every other key acts **once per press**, however long you hold it. Holding `S`
+takes one snapshot, holding `A` in gamma mode starts the sweep once, and
+holding a single-press knob steps it once.
+
 All values are in PsychoPy units: position and size in `height` units (1.0 =
 full screen height), color and contrast in `rgb` (−1 = black, 0 = mid-gray,
 +1 = white).
@@ -158,9 +162,9 @@ quitting — a mistimed press cannot end the session mid-ramp.
 
 **The HUD toggle is `H`.** Custom-frequency-down is `J`, not `H`.
 
-`ESC` is claimed in order: dismiss the menu, else cancel a running gamma
-sweep, else quit — so neither overlay can be closed by accidentally ending
-the session. Hiding the
+`ESC` is claimed in order: cancel a running gamma sweep, else dismiss the
+menu, else quit — so ESC never ends the session while a sweep or the menu is
+active. Hiding the
 readout hides only the text; the stimulus, fixation cross and gamma patch all
 keep drawing, which is what you want for an unobstructed photometer reading or
 a clean screenshot.
@@ -367,7 +371,9 @@ a different type before `SPACE` — your choice at the selector wins.
 A preset holds the stimulus settings, not the rig: window aspect, the
 `--image` path, and the live snapshot list are excluded. Presets are
 forward and backward compatible — missing keys fall back to defaults, and keys
-this version does not recognise are ignored with a console note. A corrupt
+this version does not recognise are ignored with a console note. Values are
+checked on load: anything out of range is clamped (wedges are also rounded to
+an even number, 7 becoming 8), and each correction prints one console line. A corrupt
 preset prints an error and the session continues with defaults rather than
 dying.
 

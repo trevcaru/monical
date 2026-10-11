@@ -322,6 +322,8 @@ X position, Y position, background gray, contrast, and color channels (R/G/B): a
 
 Repeat is measured against the moment the key went down, not against the last increment emitted. An increment can only land on a frame boundary, so "wait 1/rate since the last one" rounds every interval up to a whole frame and beats the realized rate below the target; accumulating against the hold start lets a short interval compensate for a long one.
 
+Every other key acts once per press, however long it is held. A press event for a key that is already down is dropped for every key, so an OS that delivers its own autorepeat as press events cannot fire a snapshot, a mode switch or a single-press knob more than once per hold. The repeat timer above is the only source of repeats. (pyglet 1.4 on Windows already filters OS autorepeat; the guard keeps this true on any backend that does not.)
+
 Two modes claim the arrow keys for themselves — gamma steps takes LEFT/RIGHT, spatial uniformity takes all four (§6.2, §6.4). While those modes are active the arrows do not repeat and do not move the stimulus. The page keys are never claimed, so background gray stays adjustable in every mode.
 
 ### 5.2 Display precision
@@ -498,7 +500,7 @@ THIS STIMULUS:
 
 The `THIS STIMULUS` block changes with the selected type, and gamma steps and spatial uniformity add a line for the keys those modes take over. Knobs stay live while the card is up, so a value can be adjusted while reading how.
 
-**`[ESC]` is claimed in order:** dismiss the menu, else cancel a running auto gamma sweep, else quit. Quitting is last so neither overlay can be closed by accidentally ending the session.
+**`[ESC]` is claimed in order:** cancel a running auto gamma sweep, else dismiss the menu, else quit. A running sweep is the most time-sensitive state, so it takes priority. Quitting is last, so ESC can never end the session while either a sweep or the menu is active.
 
 Line 5 for `custom_png` shows:
 
@@ -567,6 +569,8 @@ python monical.py --preset presets/preset_2026-09-18_143201.json
 A preset carries the stimulus, not the rig or the run. These keys are excluded: `frame_idx` and `snapshots` (live loop bookkeeping), `aspect` (comes from the window), and `image_path` (comes from `--image`).
 
 **Compatibility is deliberate in both directions.** Keys the preset omits keep their defaults, so a preset written by an older version still loads. Keys it carries that this version no longer recognises are ignored with a console note. Neither is an error — presets outlive tool versions.
+
+**Values are sanitized on load.** Every numeric parameter is clamped to its knob range (§4, §5), whole-number knobs are rounded, orientation wraps into 0–360, and `wedges` is rounded to the nearest even number, with ties going up (7 → 8), within 2–32. Non-numeric values fall back to the default. Each correction prints one console line, for example `Preset: wedges 7 -> 8 (rounded to even, range 2-32)`.
 
 An unreadable or malformed preset prints an error and the session continues with defaults. A preset is a convenience; a broken one should cost you the preset, not the calibration session.
 
