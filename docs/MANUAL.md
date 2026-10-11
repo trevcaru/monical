@@ -47,8 +47,11 @@ a typo never ends the session.
 
 `--preset PATH` restores knob settings saved earlier with `[P]` (§5f).
 
-`--text STRING` adds a custom string to the `[B]`/`[N]` cycle for stimulus
-type `[6]` and selects it at startup. There is no on-screen text entry.
+`--text STRING` sets what `[B]`/`[N]` cycle through for stimulus type `[6]`.
+Without it they step through `A`–`Z`. A single character cycles its alphabet,
+starting there. A longer string cycles the full string, then each of its
+characters, then the whole alphabet. There is no on-screen text entry. The raw
+value is recorded as `text_arg` in the session file.
 
 There is no config file, no build step, and no installer. Each session writes
 one file, `monical_YYYY-MM-DD_HHMMSS.json`, next to the script — a new one
@@ -234,17 +237,25 @@ shape; gamma steps (`G`) always fills the screen.
 
 | Param | Keys | Step | Default | Range | Repeat |
 |---|---|---|---|---|---|
-| Preset string | `B` / `N` | cycle | `ABCDEF` | 5 presets + `--text` |  |
+| String | `B` / `N` | next / previous | `A` | from `--text`, wraps | single press |
+| Font family | `I` / `O` | next / previous | monospace | monospace, sans-serif, serif | single press |
+| Letter spacing | `U` / `Y` | ±0.001 | 0.000 | −0.05–0.20 | hold |
+| Rotation | `K` / `L` | ±5° | 0 | wraps 0–360 | single press |
 | Red | `R` / `T` | ±0.001 | 1.0 | −1.0–1.0 | hold |
 | Green | `E` / `W` | ±0.001 | 1.0 | −1.0–1.0 | hold |
 | Blue | `D` / `A` | ±0.001 | 1.0 | −1.0–1.0 | hold |
 | Alpha | `Z` / `X` | ±0.01 | 1.0 | 0.0–1.0 | single press |
 
 Colour uses the same keys as the uniform patch, but defaults to **white** here
-so the glyphs show at launch. Presets are `ABCDEF`,
-`abcdef`, `123456`, `XXXXXX`, `oOoOoO`. The universal size knob sets letter
-height, so the degrees on line 3 describe the letters. PsychoPy's `TextStim`
-has no letter-spacing parameter, so there is no spacing knob.
+so the glyphs show at launch. The universal size knob sets letter height, so
+the degrees on line 3 describe the letters.
+
+The families map to Courier New, Arial and Times New Roman on Windows, with
+macOS and Linux equivalents. The console lists what each family resolved to at
+startup. If a font is missing, the readout says `FALLBACK` and names the face
+actually drawn. A string is laid out one glyph at a time on the font's advance
+widths, so at spacing 0 it is pixel-identical to a plain `TextStim`. Rotation
+turns the whole string as one piece about its centre.
 
 **Radial checkerboard**
 
@@ -413,7 +424,8 @@ long enough for your probe to settle, step manually with `S` instead.
 
 1. Select `[6]` at startup. Press `1` (static ON).
 2. Cycle to the string you want with `B` / `N`, or start with
-   `--text "MYSTRING"`.
+   `--text "MYSTRING"`. Choose the font family with `I` / `O`; adjust
+   spacing with `U` / `Y` and rotation with `K` / `L`.
 
    Text colour starts at **white** (R=G=B=1.000) so the glyphs are visible
    at launch. Drive the channels down with `T`/`W`/`A` for a coloured or
@@ -462,6 +474,7 @@ measurements. Nothing ever reads it back; it exists for you to read.
 | `has_radial_stim` | whether the plugin was available |
 | `image_path` | the `--image` argument as given, or `null` |
 | `preset_path` | the `--preset` argument as given, or `null` |
+| `text_arg` | the `--text` argument as given, or `null` |
 | `output_file` | this file's own name, so a renamed copy still says where it came from |
 | `viewing_distance_cm` | distance at quit |
 | `stimulus_type` | type chosen at startup |
@@ -513,7 +526,7 @@ nothing you dialed in is lost to rounding.
 | `grating` | `sf`, `ori`, `phase`, `waveform`, `mask` |
 | `uniform_patch` | `r`, `g`, `b`, `alpha`, `shape` |
 | `custom_png` | `filepath`, `alpha`, `rotation_deg` |
-| `text` | `text_string`, `font`, `alpha`, `r`, `g`, `b` |
+| `text` | `text_string`, `text_preset_index`, `letter_spacing`, `rotation_deg`, `font_family`, `font_requested`, `font_rendered`, `font_fallback`, `alpha`, `r`, `g`, `b` |
 
 Plus, depending on mode: `gamma_level` and `gamma_step_index` in gamma steps;
 `grid_position`, `grid_x`, `grid_y` (and `patch_*`) in spatial uniformity;

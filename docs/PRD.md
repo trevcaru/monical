@@ -294,36 +294,66 @@ All universal parameters apply: position, size, contrast, background, flicker, v
 
 ### 4.6 Text stimulus
 
-Letter strings for legibility, acuity and text-rendering checks. Monospaced so glyph width is uniform and letter height maps predictably onto the size knob.
+Letter strings for legibility, acuity, crowding and text-rendering checks.
 
-**Construction:**
+**Construction.** A single character is one ordinary TextStim:
+
 ```python
-TextStim(win=win, text=text_string, font='Courier New',
-         height=size, color=[r, g, b], opacity=alpha,
-         contrast=contrast, pos=(x, y), autoLog=False)
+TextStim(win=win, text=char, font=font_requested,
+         height=size, color=[r, g, b], colorSpace='rgb', opacity=alpha,
+         contrast=contrast, ori=rotation_deg, pos=(x, y), autoLog=False)
 ```
+
+A string of two or more characters is drawn as **one TextStim per glyph**, each anchored at its pen origin (`anchorHoriz='left'`, `alignText='left'`) with the same font, height, colour, opacity, contrast and `ori`. PsychoPy's TextStim has no letter-spacing parameter and rotates only about its own anchor, so per-glyph layout is the only way to offer spacing and rigid rotation.
 
 `height` is the universal size knob, so the degrees on readout line 3 describe the letter height.
 
+**Layout from advance widths.** Glyph positions come from the font's advance widths, not ink bounding boxes. They are read from the same pyglet font object TextStim draws with (`pyglet.font.load(font, int(height_px * 0.75))`, then `get_glyphs()`), so no new dependency is involved. Glyph *i*'s pen position is the sum of the advances of glyphs 0..*i*−1 plus *i* × spacing. The string's full advance extent is centred on (x, y) using pyglet's own integer arithmetic for a centred line, `-(W // 2) + (W - width) // 2` with W the TextStim wrap width in px. A plain `-width / 2` puts odd widths on a half pixel, 1 px off a single TextStim.
+
+*Measured:* at spacing 0, the per-glyph layout is **pixel-identical** to a single TextStim of the same string. That held for "AHO" and "WAVE" in all three fonts at size 0.225 centred (0 differing pixels, per-glyph offset 0 px), and for "WAVE", "AHO" and "Hamburgefonts" at three other sizes and fractional positions. pyglet 1.4 applies no kerning, so the kerning-prone "WAVE" shows no pair adjustment in either rendering.
+
+**Rotation** turns each glyph's `ori` and also rotates its offset about the string centre (clockwise, PsychoPy's convention), so the string turns as a rigid unit. *Measured:* at 90° the ink-box centres of "AHO" lie on one vertical line (0 px spread), in reading order top to bottom.
+
+**Font family** maps to the first installed name on the machine:
+
+| Family | Candidates, in order |
+|---|---|
+| monospace | Courier New, Menlo, DejaVu Sans Mono, Liberation Mono |
+| sans-serif | Arial, Helvetica, DejaVu Sans, Liberation Sans |
+| serif | Times New Roman, Times, DejaVu Serif, Liberation Serif |
+
+pyglet silently substitutes its default face (Arial on Windows) for a name it cannot find. So each family is resolved at startup with `pyglet.font.have_font()`, and the console prints what each will render. If no candidate is installed, the readout says so explicitly, for example `Font: serif (FALLBACK Arial: Times New Roman not installed)`, and the snapshot records `font_rendered` as the substitute with `font_fallback: true`. It never claims the requested face. *Verified* by forcing a missing name: it rendered pixel-identical to Arial, and was reported as such.
+
 **Stimulus-specific parameters:**
 
-| Param | Key | Increment | Default | Range |
-|-------|-----|-----------|---------|-------|
-| Preset string | `[B/N]` | cycle fwd/back | `ABCDEF` | see below |
-| Red | `[R/T]` | ±0.001 | 1.0 | -1.0–1.0 |
-| Green | `[E/W]` | ±0.001 | 1.0 | -1.0–1.0 |
-| Blue | `[D/A]` | ±0.001 | 1.0 | -1.0–1.0 |
-| Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 |
+| Param | Key | Increment | Default | Range | Repeat |
+|-------|-----|-----------|---------|-------|--------|
+| String | `[B/N]` | next / previous | see below | wraps | single press |
+| Font family | `[I/O]` | next / previous | monospace | monospace, sans-serif, serif (wraps) | single press |
+| Letter spacing | `[U/Y]` | ±0.001 height units | 0.000 | −0.05–0.20 | hold |
+| Rotation | `[K/L]` | ±5° | 0 | 0–360, wraps (355 + 5 = 0, 0 − 5 = 355) | single press |
+| Red | `[R/T]` | ±0.001 | 1.0 | -1.0–1.0 | hold |
+| Green | `[E/W]` | ±0.001 | 1.0 | -1.0–1.0 | hold |
+| Blue | `[D/A]` | ±0.001 | 1.0 | -1.0–1.0 | hold |
+| Alpha | `[Z/X]` | ±0.01 | 1.0 | 0.0–1.0 | single press |
 
-Colour uses the uniform patch's bindings unchanged. String cycling takes its own `[B]`/`[N]` rather than overloading `[R/T]`, so no key means two things.
+The first key of each pair increases (U, K) or steps forward (I, B). Spacing is inert for a single character, but the readout still shows its value. Colour and alpha apply to every glyph.
 
-Preset strings: `ABCDEF`, `abcdef`, `123456`, `XXXXXX`, `oOoOoO`. A custom string is supplied with `--text "MYSTRING"`, which appends it to the cycle and selects it at startup — Monical has no on-screen text entry, and adding one would need a widget (§13).
+**`--text` and the `[B/N]` cycle.** Monical has no on-screen text entry, since that would need a widget (§13), so strings come from the command line:
 
-PsychoPy's `TextStim` has **no `letterSpacing` parameter**, so there is no letter-spacing knob.
+| `--text` | `[B/N]` cycle | Starts at |
+|---|---|---|
+| absent | `A` … `Z`, single characters | `A` |
+| one character | its alphabet, single characters (a–z for a lowercase letter; any other character is placed before A–Z) | that character |
+| two or more | the full string, then each of its characters, then `ABCDEFGHIJKLMNOPQRSTUVWXYZ` as one string | the full string |
 
-**Readout line 5:** `Text: 'ABCDEF' | R: 1.000 | G: 1.000 | B: 1.000 | Alpha: 1.000`
+The current entry is always displayed in full. The raw `--text` value is recorded as `text_arg` in the session header (`null` when absent).
 
-**Stimulus-specific snapshot fields:** `{"text_string": "ABCDEF", "font": "Courier New", "alpha": 1.0, "r": 1.0, "g": 1.0, "b": 1.0}`
+**Readout line 5:** `Text: AHO | Font: monospace (Courier New) | Spacing: 0.000 | Rot: 0 | R 1.000 G 1.000 B 1.000 A 1.000`. Strings over 24 characters are truncated with `...` in the readout only. It wraps onto line 6 if wider than the screen (§8).
+
+**Stimulus-specific snapshot fields:** `text_string` (the string displayed, in full), `text_preset_index`, `letter_spacing`, `rotation_deg`, `font_family`, `font_requested`, `font_rendered`, `font_fallback`, `alpha`, `r`, `g`, `b`.
+
+**Presets** carry the string index, spacing, family and rotation. The resolved font names are not carried; they belong to the machine. On load `text_index` wraps modulo the current session's cycle length, and the string follows the index. An unknown `mode` falls back to `static_on`. Both print a console line.
 
 **Colour defaults to white (1.0) for this type only.** rgb 0.0 is the same mid-gray as the default background, which rendered the glyphs invisible at launch. The uniform patch (§4.4) keeps 0.0, because there mid-gray is the calibration starting point the patch is meant to be driven away from. The default is chosen in `default_state()` from the stimulus type, so state, readout and snapshot never disagree with what is on screen.
 
@@ -526,7 +556,8 @@ ACTIONS:   S=Snapshot  P=Preset  F12=Screenshot
            H=Toggle HUD  M=This menu  Q=Quit
 
 THIS STIMULUS:
-  B/N = Cycle string | R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha
+  B/N = Cycle string | I/O = Font | U/Y = Spacing | K/L = Rotation
+  R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha
 
 [M] or [ESC] to dismiss
 ```
@@ -656,7 +687,18 @@ Seed file: `seed tool` from the Odegaard Lab SSVEP experiment repo (`lab-ssvep-e
 
 ## 15. Open questions
 
-1. **Key bindings for stimulus-specific params.** The current mapping reuses R/T, E/W, D/A, Z/X across stimulus types with different meanings. This is compact but potentially confusing. Alternative: use a consistent semantic mapping and show a legend. Decide during implementation.
+1. ~~**Key bindings for stimulus-specific params.**~~ **Settled.** Pairs are reused across types, the readout and the `[M]` card always show the active legend, and alpha is `[Z/X]` on every type that has it:
+
+   | Type | Z/X | R/T | E/W | D/A | B / N | U/Y | I/O | K/L |
+   |---|---|---|---|---|---|---|---|---|
+   | Radial | rings | wedges | – | – | – | – | – | – |
+   | Gabor | SF | orientation | phase | envelope SD | – | – | – | – |
+   | Grating | SF | orientation | phase | waveform | mask / – | – | – | – |
+   | Uniform | alpha | red | green | blue | shape / – | – | – | – |
+   | Custom PNG | alpha | rotation | – | – | – | – | – | – |
+   | Text | alpha | red | green | blue | string fwd / back | spacing | font | rotation |
+
+   The first key of each pair increases or steps forward. In gamma mode `[A]` is the auto sweep on every type (§6.5).
 
 2. **Monitor physical dimensions.** Needed for visual angle. Auto-detect if possible (PsychoPy's Monitor object can store this). Fall back to manual entry on the info screen.
 

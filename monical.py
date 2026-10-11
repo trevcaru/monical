@@ -93,7 +93,7 @@ SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
 # are not carried in a preset. `aspect` comes from the window, `image_path`
 # from --image, and the other two are live loop bookkeeping.
 PRESET_EXCLUDE = ('frame_idx', 'snapshots', 'aspect', 'image_path',
-                  'win_w', 'win_h')
+                  'win_w', 'win_h', 'font_requested', 'font_rendered')
 
 SETTLE_S = 2.0                    # auto gamma dwell per level (PRD 6.5)
 
@@ -117,12 +117,18 @@ STIMULUS_LABELS = {
     STIM_TEXT: 'Text / letter string (reading/crowding)',
 }
 
-# PRD 4.6. Monospaced so glyph width is uniform and letter height maps
-# predictably onto the size knob.
-TEXT_FONT = 'Courier New'
-TEXT_PRESETS = ['ABCDEF', 'abcdef', '123456', 'XXXXXX', 'oOoOoO']
+# PRD 4.6. [B]/[N] cycle a list built from --text (text_cycle). Font family
+# maps to the first installed name: Windows first, then macOS, then Linux.
+ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 TEXT_CYCLE_FWD = 'b'
 TEXT_CYCLE_BACK = 'n'
+FONT_CANDIDATES = {
+    'monospace': ['Courier New', 'Menlo', 'DejaVu Sans Mono',
+                  'Liberation Mono'],
+    'sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans', 'Liberation Sans'],
+    'serif': ['Times New Roman', 'Times', 'DejaVu Serif', 'Liberation Serif'],
+}
+TEXT_HUD_CHARS = 24               # HUD shows longer strings truncated
 
 # Physically implausible screen heights. Below or above these the Monitor
 # object almost certainly holds a default rather than this rig's real size,
@@ -280,6 +286,7 @@ STEP_SD = 0.01
 STEP_RGB = 0.001
 STEP_ALPHA = 0.01
 STEP_ROT = 5.0
+STEP_SPACING = 0.001
 
 # Discrete parameters. Their knobs are kind 'choice': delta steps through the
 # list, wrapping. Mask 'none' is stored as a string so it round-trips through
@@ -288,6 +295,7 @@ CHOICES = {
     'waveform': ['sin', 'sqr', 'saw'],
     'mask': ['none', 'circle'],
     'shape': ['rect', 'circle'],
+    'font_family': ['monospace', 'sans-serif', 'serif'],
 }
 
 _GRATING_KNOBS = {
@@ -345,6 +353,12 @@ STIM_KNOBS = {
         'a': ('b', -STEP_RGB, -1.0, 1.0, 'float'),
         'z': ('alpha', +STEP_ALPHA, 0.0, 1.0, 'float'),
         'x': ('alpha', -STEP_ALPHA, 0.0, 1.0, 'float'),
+        'u': ('letter_spacing', +STEP_SPACING, -0.05, 0.20, 'float'),
+        'y': ('letter_spacing', -STEP_SPACING, -0.05, 0.20, 'float'),
+        'i': ('font_family', +1, None, None, 'choice'),
+        'o': ('font_family', -1, None, None, 'choice'),
+        'k': ('rotation_deg', +STEP_ROT, 0.0, 360.0, 'wrap'),
+        'l': ('rotation_deg', -STEP_ROT, 0.0, 360.0, 'wrap'),
     },
 }
 
@@ -354,11 +368,11 @@ STIM_KNOBS = {
 REPEAT_KEYS = ('left', 'right', 'up', 'down',      # x / y position
                'pageup', 'pagedown',               # background gray
                'c', 'v')                           # contrast
-# ...plus the colour channels, which share the 0.001 step and so the same
-# problem. Alpha is 0.01 and stays single-press.
+# ...plus the colour channels and letter spacing, which share the 0.001 step
+# and so the same problem. Alpha is 0.01 and stays single-press.
 REPEAT_KEYS_BY_STIM = {
     STIM_UNIFORM: ('r', 't', 'e', 'w', 'd', 'a'),
-    STIM_TEXT: ('r', 't', 'e', 'w', 'd', 'a'),
+    STIM_TEXT: ('r', 't', 'e', 'w', 'd', 'a', 'u', 'y'),
 }
 
 # Clock-driven rather than frame-driven, so the rate is the same whatever the
@@ -721,10 +735,14 @@ def default_state(stimulus_type):
         'image_path': GENERATED_LABEL,
         'rotation_deg': 0.0,
 
-        # Text stimulus (PRD 4.6)
-        'text_string': TEXT_PRESETS[0],
+        # Text stimulus (PRD 4.6). rotation_deg above is shared with PNG.
+        'text_string': ALPHABET[0],
         'text_index': 0,
-        'font': TEXT_FONT,
+        'letter_spacing': 0.0,
+        'font_family': 'monospace',
+        # Resolved at startup (resolve_font); not carried in presets.
+        'font_requested': FONT_CANDIDATES['monospace'][0],
+        'font_rendered': None,
 
         # HUD visibility (PRD 8.1). Only the readout hides; every stimulus
         # and the status bar keep rendering.
@@ -821,6 +839,152 @@ def size_patch(patch, size):
     else:
         patch.width = size
         patch.height = size
+
+
+def text_cycle(text_arg):
+    """(strings [B]/[N] cycle through, starting index) for --text (PRD 4.6).
+
+    None: A-Z. One character: its alphabet, starting there (a-z for a
+    lowercase letter; anything else is put in front of A-Z). Longer: the full
+    string, each of its characters, then the whole alphabet as one string.
+    """
+    if not text_arg:
+        return list(ALPHABET), 0
+    if len(text_arg) == 1:
+        letters = ALPHABET.lower() if text_arg in ALPHABET.lower() else ALPHABET
+        if text_arg in letters:
+            return list(letters), letters.index(text_arg)
+        return [text_arg] + list(ALPHABET), 0
+    return [text_arg] + list(text_arg) + [ALPHABET], 0
+
+
+def resolve_font(family):
+    """(requested, rendered) font names for a family on this machine.
+
+    pyglet silently substitutes its default face for a name it cannot find,
+    so have_font() is asked first: when no candidate is installed, `rendered`
+    names the face pyglet will actually draw rather than the one requested.
+    """
+    import pyglet.font
+    candidates = FONT_CANDIDATES[family]
+    for name in candidates:
+        if pyglet.font.have_font(name):
+            return name, name
+    fallback = getattr(getattr(pyglet.font, '_font_class', None),
+                       '_default_name', None)
+    return candidates[0], fallback or 'system default'
+
+
+def font_label(state):
+    """'serif (Times New Roman)', or an explicit fallback statement."""
+    requested, rendered = state['font_requested'], state['font_rendered']
+    if rendered is None or rendered == requested:
+        return '{} ({})'.format(state['font_family'], requested)
+    return '{} (FALLBACK {}: {} not installed)'.format(
+        state['font_family'], rendered, requested)
+
+
+def glyph_advances(text, font, height_px):
+    """Pixel advance of each glyph, from the same pyglet face TextStim uses.
+
+    TextStim hands pyglet.text.Label int(height_px * 0.75) pt at 96 dpi, and
+    pyglet lays a line out by summing these advances (no kerning). Advances,
+    not ink extents, so the layout matches a single TextStim.
+    """
+    import pyglet.font
+    face = pyglet.font.load(font, int(height_px * 0.75))
+    return [glyph.advance for glyph in face.get_glyphs(text)]
+
+
+def glyph_offsets(advances_px, spacing, rotation_deg, win_h, wrap_px=None):
+    """Offset of each glyph's pen origin from the string centre, height units.
+
+    Pen i = sum of advances 0..i-1 + i * spacing, and the full advance extent
+    is centred. Offsets are then turned with the string, clockwise like
+    PsychoPy's ori, so the glyphs rotate as one rigid unit.
+
+    Centring copies pyglet's integer arithmetic for a centred TextStim line,
+    -(W // 2) + (W - width) // 2 with W its wrap width in px. A plain
+    -width / 2 lands odd widths on a half pixel, 1 px off a single TextStim.
+    """
+    spacing_px = spacing * win_h
+    total = sum(advances_px) + (len(advances_px) - 1) * spacing_px
+    if wrap_px is None or total > wrap_px:
+        pen = -total / 2.0
+    else:
+        pen = -(wrap_px // 2) + (wrap_px - total) // 2
+    xs = []
+    for advance in advances_px:
+        xs.append(pen / float(win_h))
+        pen += advance + spacing_px
+    theta = math.radians(rotation_deg)
+    return [(x * math.cos(theta), -x * math.sin(theta)) for x in xs]
+
+
+class GlyphString(object):
+    """PRD 4.6 text stimulus: one TextStim per glyph, laid out on advances.
+
+    A single character is one ordinary centred TextStim, exactly the v1
+    construction. Longer strings get a TextStim per glyph, anchored at its pen
+    origin, so letter spacing and rigid rotation are possible -- TextStim has
+    neither. Exposes pos, contrast and draw() like a stimulus, so dual mode
+    and flicker treat it as one.
+    """
+
+    def __init__(self, win):
+        self.win = win
+        self.pos = (0.0, 0.0)
+        self.contrast = 1.0
+        self.glyphs = []
+        self.offsets = []
+        self.advances = []
+        self._build_key = None
+        self._layout_key = None
+        self._style = None
+
+    def update(self, state):
+        text, font = state['text_string'], state['font_requested']
+        size, win_h = state['size'], self.win.size[1]
+        build_key = (text, font, size)
+        if build_key != self._build_key:
+            single = len(text) <= 1
+            self.glyphs = [visual.TextStim(
+                win=self.win, text=char, font=font, height=size,
+                colorSpace='rgb',
+                anchorHoriz='center' if single else 'left',
+                alignText='center' if single else 'left',
+                autoLog=False) for char in (text if text else ' ')]
+            self.advances = ([0] if single else
+                             glyph_advances(text, font, size * win_h))
+            self._build_key = build_key
+            self._layout_key = self._style = None
+        layout_key = (state['letter_spacing'], state['rotation_deg'])
+        if layout_key != self._layout_key:
+            if len(self.glyphs) == 1:
+                self.offsets = [(0.0, 0.0)]     # spacing is inert
+            else:
+                # The wrap width a default single TextStim would centre in.
+                wrap_px = getattr(self.glyphs[0], '_wrapWidthPix', None)
+                self.offsets = glyph_offsets(self.advances, layout_key[0],
+                                             layout_key[1], win_h, wrap_px)
+            for glyph in self.glyphs:
+                glyph.ori = layout_key[1]
+            self._layout_key = layout_key
+        style = (state['r'], state['g'], state['b'], state['alpha'],
+                 self.contrast)
+        if style != self._style:
+            # Each setter rebuilds the glyph's pyglet label, so only on change.
+            for glyph in self.glyphs:
+                glyph.color = list(style[:3])
+                glyph.opacity = style[3]
+                glyph.contrast = style[4]
+            self._style = style
+
+    def draw(self):
+        x, y = self.pos
+        for glyph, (dx, dy) in zip(self.glyphs, self.offsets):
+            glyph.pos = (x + dx, y + dy)
+            glyph.draw()
 
 
 def radial_cycles_for(state):
@@ -989,14 +1153,14 @@ WORKFLOWS = {
         "       [B] rect/circle   plus the universal knobs.",
     ],
     STIM_TEXT: [
-        "1. Cycle preset strings with [B]/[N].",
+        "1. Cycle strings with [B]/[N] (A-Z, or built from --text).",
         "2. Adjust size for the target letter height in degrees;",
         "   readout line 3 shows degrees and pixels.",
         "3. Set text colour with [R/T], [E/W], [D/A]; step contrast",
         "   with [C/V].",
         "",
-        "KNOBS: [B/N] cycle string  [R/T] red  [E/W] green",
-        "       [D/A] blue  [Z/X] alpha",
+        "KNOBS: [B/N] string  [I/O] font  [U/Y] spacing  [K/L] rotate",
+        "       [R/T] red  [E/W] green  [D/A] blue  [Z/X] alpha",
         "       plus the universal knobs. [M] for the full card.",
     ],
     STIM_CUSTOM_PNG: [
@@ -1192,9 +1356,13 @@ def stim_line(state, sweep=None):
                 'Shape: {}').format(state['r'], state['g'], state['b'],
                                     state['alpha'], state['shape'])
     if stim_type == STIM_TEXT:
-        return ("Text: '{}' | R: {:.3f} | G: {:.3f} | B: {:.3f} | "
-                "Alpha: {:.3f}").format(
-                    state['text_string'], state['r'], state['g'],
+        text = state['text_string']
+        if len(text) > TEXT_HUD_CHARS:
+            text = text[:TEXT_HUD_CHARS - 3] + '...'   # HUD only; JSON is full
+        return ('Text: {} | Font: {} | Spacing: {:.3f} | Rot: {:g} | '
+                'R {:.3f} G {:.3f} B {:.3f} A {:.3f}').format(
+                    text, font_label(state), state['letter_spacing'],
+                    state['rotation_deg'], state['r'], state['g'],
                     state['b'], state['alpha'])
     if stim_type == STIM_CUSTOM_PNG:
         # Filename only; the full path goes in the snapshot (PRD 8).
@@ -1231,8 +1399,9 @@ MENU_STIM_KEYS = {
     STIM_UNIFORM: ('R/T = Red | E/W = Green | D/A = Blue | Z/X = Alpha | '
                    'B = Shape'),
     STIM_CUSTOM_PNG: 'Z/X = Alpha | R/T = Rotation',
-    STIM_TEXT: ('B/N = Cycle string | R/T = Red | E/W = Green | '
-                'D/A = Blue | Z/X = Alpha'),
+    STIM_TEXT: ('B/N = Cycle string | I/O = Font | U/Y = Spacing | '
+                'K/L = Rotation\n  R/T = Red | E/W = Green | D/A = Blue | '
+                'Z/X = Alpha'),
 }
 
 
@@ -1359,7 +1528,15 @@ def stimulus_specific(state):
     elif stim_type == STIM_TEXT:
         record = {
             'text_string': state['text_string'],
-            'font': state['font'],
+            'text_preset_index': state['text_index'],
+            'letter_spacing': round(state['letter_spacing'], STORE_DP),
+            'rotation_deg': round(state['rotation_deg'], STORE_DP),
+            'font_family': state['font_family'],
+            'font_requested': state['font_requested'],
+            'font_rendered': state['font_rendered'],
+            'font_fallback': (state['font_rendered'] is not None and
+                              state['font_rendered'] !=
+                              state['font_requested']),
             'alpha': round(state['alpha'], STORE_DP),
             'r': round(state['r'], STORE_DP),
             'g': round(state['g'], STORE_DP),
@@ -1443,7 +1620,8 @@ def state_record(state, screen_height_cm, refresh_hz=None,
 
 
 def session_header(win, mon, resolution, screen_height_cm, startup_hz,
-                   image_arg, started=None, out_path=None, preset_arg=None):
+                   image_arg, started=None, out_path=None, preset_arg=None,
+                   text_arg=None):
     """Everything about the rig that does not change during the session.
 
     Captured once, at startup, so a reader months later can tell what the
@@ -1486,6 +1664,7 @@ def session_header(win, mon, resolution, screen_height_cm, startup_hz,
         'platform': sys.platform,
         'has_radial_stim': bool(HAS_RADIAL),
         'image_path': image_arg,
+        'text_arg': text_arg,
         'preset_path': preset_arg,
         # The file these values are being written to, recorded inside the file
         # so a renamed copy still says where it came from.
@@ -1693,7 +1872,7 @@ def sanitize_param(field, value, default, ranges):
     return fixed, ('' if fixed == value else reason)
 
 
-def apply_preset(state, loaded):
+def apply_preset(state, loaded, text_presets=None):
     """Overlay a preset onto a default state. Returns the keys applied.
 
     Forward and backward compatible on purpose: keys the preset omits keep
@@ -1718,6 +1897,20 @@ def apply_preset(state, loaded):
             value = fixed
         state[key] = value
         applied.append(key)
+    if state['mode'] not in MODE_KEYS.values():
+        print("Preset: mode {!r} -> {!r} (unknown mode)".format(
+            state['mode'], MODE_STATIC_ON))
+        state['mode'] = MODE_STATIC_ON
+    if text_presets:
+        # The cycle list comes from this session's --text, so an index saved
+        # under another one wraps, and the string follows the index.
+        index = state['text_index'] % len(text_presets)
+        if index != state['text_index']:
+            print("Preset: text_index {} -> {} (wrapped, {} strings in "
+                  "this session's cycle)".format(
+                      state['text_index'], index, len(text_presets)))
+        state['text_index'] = index
+        state['text_string'] = text_presets[index]
     if ignored:
         print("Preset: ignored {} unknown key(s): {}".format(
             len(ignored), ', '.join(sorted(ignored)[:8])))
@@ -1738,9 +1931,10 @@ def parse_args(argv=None):
              'generated 256x256 checkerboard test pattern.')
     parser.add_argument(
         '--text', metavar='STRING', default=None,
-        help='Custom string for stimulus type [6], added to the [B]/[N] '
-             'cycle. Monical has no on-screen text entry (keyboard-only, no '
-             'widgets), so a custom string comes in here.')
+        help='String for stimulus type [6]. One character: [B]/[N] cycle '
+             'the alphabet from it. Longer: they cycle the full string, each '
+             'of its characters, then A-Z. Without it, A-Z. Monical has no '
+             'on-screen text entry (keyboard-only, no widgets).')
     parser.add_argument(
         '--preset', metavar='PATH', default=None,
         help='Preset JSON saved with [P]. Restores the knobs and preselects '
@@ -1758,7 +1952,7 @@ def main(argv=None):
     session_slug = timestamp_slug(session_started)
     out_path = session_out_path(session_slug)
 
-    text_presets = list(TEXT_PRESETS)
+    text_presets, text_start = text_cycle(args.text)
     preset = load_preset(args.preset) if args.preset else {}
     preset_name = os.path.basename(args.preset) if args.preset else ''
 
@@ -1811,17 +2005,13 @@ def main(argv=None):
     state['image_path'] = image_label
     state['aspect'] = resolution[0] / float(resolution[1])
     state['win_w'], state['win_h'] = resolution
-    if args.text:
-        # A custom string joins the cycle and is selected immediately.
-        if args.text not in text_presets:
-            text_presets.append(args.text)
-        state['text_index'] = text_presets.index(args.text)
-        state['text_string'] = args.text
+    state['text_index'] = text_start
+    state['text_string'] = text_presets[text_start]
     if preset:
         # Applied after default_state so omitted keys keep their defaults,
         # and after stimulus_type so the operator's choice at the selector
         # wins over the preset's if they changed it.
-        applied = apply_preset(state, preset)
+        applied = apply_preset(state, preset, text_presets)
         state['stimulus_type'] = stimulus_type
         print("Preset {}: applied {} value(s).".format(preset_name,
                                                        len(applied)))
@@ -1848,13 +2038,15 @@ def main(argv=None):
             autoLog=False)
     elif stimulus_type == STIM_TEXT:
         # PRD 4.6. height is the universal size knob, so the letter height is
-        # the thing the degree readout describes.
-        stim = visual.TextStim(
-            win=win, text=state['text_string'], font=state['font'],
-            height=state['size'], color=[state['r'], state['g'], state['b']],
-            colorSpace='rgb', opacity=state['alpha'],
-            contrast=state['contrast'],
-            pos=(state['x_pos'], state['y_pos']), autoLog=False)
+        # the thing the degree readout describes. Fonts are resolved once:
+        # what each family will actually render on this machine.
+        fonts = {family: resolve_font(family)
+                 for family in CHOICES['font_family']}
+        for family, (requested, rendered) in fonts.items():
+            print("Font {}: {}{}".format(
+                family, rendered, '' if rendered == requested else
+                ' (FALLBACK -- {} not installed)'.format(requested)))
+        stim = GlyphString(win)
     elif stimulus_type == STIM_UNIFORM:
         # Both shapes exist from the start; [B] only changes which is drawn.
         uniform_patches = {shape: make_patch(win, state, shape)
@@ -1964,7 +2156,7 @@ def main(argv=None):
     session = session_header(win, mon, resolution, screen_height_cm,
                              measured_refresh, args.image,
                              started=session_started, out_path=out_path,
-                             preset_arg=args.preset)
+                             preset_arg=args.preset, text_arg=args.text)
     frame_clock = core.Clock()
     intervals = collections.deque(maxlen=ROLLING_FRAMES)
     startup_threshold = DROP_FACTOR / measured_refresh
@@ -2117,11 +2309,9 @@ def main(argv=None):
                 stim.fillColor = [state['r'], state['g'], state['b']]
                 stim.opacity = state['alpha']
             elif stimulus_type == STIM_TEXT:
-                # TextStim sizes by `height` (the letter height), not `size`.
-                stim.height = state['size']
-                stim.text = state['text_string']
-                stim.color = [state['r'], state['g'], state['b']]
-                stim.opacity = state['alpha']
+                family = state['font_family']
+                state['font_requested'], state['font_rendered'] = fonts[family]
+                stim.update(state)
             else:
                 stim.size = state['size']
             if stimulus_type in (STIM_GABOR, STIM_GRATING):
