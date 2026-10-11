@@ -163,6 +163,12 @@ HUD_WRAP_W = 1.8
 HUD_CHAR_W = 0.514 * HUD_HEIGHT
 HUD_LINE_PITCH = 0.0204
 
+# The readout's timing figures (rolling refresh, sigma, drop count) change on
+# every frame. Re-laying out a TextStim costs more than 1 ms -- a quarter of a
+# 240 Hz frame -- so those figures refresh at most this often, on the clock.
+# Everything else in the readout still appears on the very next frame.
+HUD_TIMING_INTERVAL_S = 0.1
+
 MENU_HEIGHT = 0.021
 MENU_BOX_W_FRAC = 0.72            # of screen width
 MENU_BOX_H_FRAC = 0.62            # of screen height -- about 60% centred
@@ -1128,20 +1134,26 @@ class GlyphString(object):
     """PRD 4.6 text stimulus: one TextStim per glyph, laid out on advances.
 
     A single character is one ordinary centred TextStim, exactly the v1
-    construction. Longer strings get a TextStim per glyph, anchored at its pen
-    origin, so letter spacing and rigid rotation are possible -- TextStim has
-    neither. Exposes pos, contrast and draw() like a stimulus, so dual mode
-    and flicker treat it as one.
+    construction. So is an unspaced, unrotated string that fits the TextStim's
+    wrap width -- the fast path: the per-glyph layout is pixel-identical to it
+    there, and one draw is several times cheaper than one per glyph. Otherwise
+    each glyph is its own TextStim, anchored at its pen origin, so letter
+    spacing and rigid rotation are possible -- TextStim has neither. Exposes
+    pos, contrast and draw() like a stimulus, so multi mode and flicker treat
+    it as one.
     """
 
-    def __init__(self, win):
+    def __init__(self, win, fast=True):
         self.win = win
+        self.fast = fast
         self.pos = (0.0, 0.0)
         self.contrast = 1.0
         self.glyphs = []
         self.offsets = []
         self.advances = []
         self.height = 0.0
+        self._advance_key = None
+        self._wrap_probe = None
         self._build_key = None
         self._layout_key = None
         self._style = None
@@ -1149,22 +1161,28 @@ class GlyphString(object):
     def update(self, state):
         text, font = state['text_string'], state['font_requested']
         size, win_h = state['size'], self.win.size[1]
-        build_key = (text, font, size)
-        if build_key != self._build_key:
-            single = len(text) <= 1
-            self.glyphs = [visual.TextStim(
-                win=self.win, text=char, font=font, height=size,
-                colorSpace='rgb',
-                anchorHoriz='center' if single else 'left',
-                alignText='center' if single else 'left',
-                autoLog=False) for char in (text if text else ' ')]
+        if (text, font, size) != self._advance_key:
             self.advances = glyph_advances(text or ' ', font, size * win_h)
+            self._advance_key = (text, font, size)
+        whole = len(text) <= 1 or (
+            self.fast and state['letter_spacing'] == 0 and
+            state['rotation_deg'] == 0 and
+            sum(self.advances) <= self._wrap_px(size))
+        build_key = (text, font, size, whole)
+        if build_key != self._build_key:
+            pieces = [text or ' '] if whole else list(text)
+            self.glyphs = [visual.TextStim(
+                win=self.win, text=piece, font=font, height=size,
+                colorSpace='rgb',
+                anchorHoriz='center' if whole else 'left',
+                alignText='center' if whole else 'left',
+                autoLog=False) for piece in pieces]
             self.height = size
             self._build_key = build_key
             self._layout_key = self._style = None
         layout_key = (state['letter_spacing'], state['rotation_deg'])
         if layout_key != self._layout_key:
-            if len(self.glyphs) == 1:
+            if len(self.glyphs) == 1:   # one character, or the fast path
                 self.offsets = [(0.0, 0.0)]     # spacing is inert
             else:
                 # The wrap width a default single TextStim would centre in.
@@ -1183,6 +1201,13 @@ class GlyphString(object):
                 glyph.opacity = style[3]
                 glyph.contrast = style[4]
             self._style = style
+
+    def _wrap_px(self, size):
+        """The wrap width a default TextStim of this height would get."""
+        if self._wrap_probe is None:
+            self._wrap_probe = visual.TextStim(win=self.win, text=' ',
+                                               height=size, autoLog=False)
+        return self._wrap_probe._wrapWidthPix
 
     def extent(self):
         """(width, height) of the string's advance box, height units."""
@@ -1515,6 +1540,13 @@ def show_intro(win, resolution, refresh_hz, image_label, out_name='',
 
 def _deg(value):
     return '--' if value is None else '{:.2f}'.format(value)
+
+
+def set_text(stim, text):
+    """Assign TextStim text only if it changed: every assignment re-lays out
+    the whole block in pyglet, which costs far more than comparing strings."""
+    if stim.text != text:
+        stim.text = text
 
 
 def ring_positions(state):
@@ -2692,6 +2724,9 @@ def main(argv=None):
     dropped_frames = 0
     total_flips = 0
     rolling_hz, rolling_sd_ms = measured_refresh, None
+    # What the readout last showed of the timing figures, and when.
+    hud_clock = core.Clock()
+    hud_timing = {'at': -1.0, 'hz': rolling_hz, 'sd': None, 'drops': 0}
     divergence_warned = False
 
     # ---- Main loop -----------------------------------------------------------
@@ -2934,28 +2969,35 @@ def main(argv=None):
                 marker.draw()
 
         if state['hud_visible']:
-            hud.text = build_hud(state, resolution, measured_refresh,
-                                 rolling_hz, screen_height_cm,
-                                 sd_ms=rolling_sd_ms, drops=dropped_frames,
-                                 sweep=sweep,
-                                 out_name=os.path.basename(out_path))
+            # Timing figures refresh on the clock (HUD_TIMING_INTERVAL_S);
+            # the strings are rebuilt every frame, but set_text re-lays out
+            # only when one differs, so a knob change shows on the next frame.
+            now = hud_clock.getTime()
+            if now - hud_timing['at'] >= HUD_TIMING_INTERVAL_S:
+                hud_timing.update(at=now, hz=rolling_hz, sd=rolling_sd_ms,
+                                  drops=dropped_frames)
+            set_text(hud, build_hud(state, resolution, measured_refresh,
+                                    hud_timing['hz'], screen_height_cm,
+                                    sd_ms=hud_timing['sd'],
+                                    drops=hud_timing['drops'], sweep=sweep,
+                                    out_name=os.path.basename(out_path)))
             extra = hud.text.count('\n') - 4
             hud.pos = (0, HUD_POS_Y + max(0, extra) * HUD_LINE_PITCH / 2.0)
             hud.draw()
 
         # Always drawn, whatever [H] says (PRD 8.2).
-        status.text = build_status_bar(state, os.path.basename(out_path))
+        set_text(status, build_status_bar(state, os.path.basename(out_path)))
         status.draw()
 
         if state['menu_visible']:
             menu_box.width = state['aspect'] * MENU_BOX_W_FRAC
             menu_box.draw()
             menu_text.pos = (-menu_box.width / 2.0 + MENU_PAD, 0)
-            menu_text.text = build_menu_text(state)
+            set_text(menu_text, build_menu_text(state))
             menu_text.draw()
 
         if flash_frames > 0:
-            flash.text = flash_text
+            set_text(flash, flash_text)
             flash.draw()
             flash_frames -= 1
 

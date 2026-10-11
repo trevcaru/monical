@@ -623,6 +623,10 @@ BG: 0.000 | Contrast: 1.000 | Freq: 15.00 Hz (16 fr, 8 on/8 off) idle
 SF: 4.00 c/unit | Ori: 0.0 deg | Phase: 0.50 | SD: 0.060 (mask sd 1.88)
 ```
 
+The timing figures on line 1 (rolling refresh, σ, drop count) update ten
+times a second; everything else updates on the next frame. Every dropped frame
+is still counted, and a new drop shows within about 0.1 s.
+
 **Line 1 — the display.** Resolution, then the *rolling* refresh rate measured
 from real flip-to-flip intervals over the last 120 frames, not the startup
 measurement.
