@@ -408,7 +408,10 @@ a different type before `SPACE` — your choice at the selector wins.
 A preset holds the stimulus settings, not the rig: window aspect, the
 `--image` path, and the live snapshot list are excluded. Presets are
 forward and backward compatible — missing keys fall back to defaults, and keys
-this version does not recognise are ignored with a console note. Mode `5` is
+this version does not recognise are ignored with a console note. A text
+preset restores its string by name when the current `[B]`/`[N]` cycle contains
+it. Otherwise it falls back to the saved position in the cycle and says on the
+console which string it loaded instead. Mode `5` is
 saved as a frame count plus the refresh it was saved at. On a panel more than
 1% faster or slower, it converts to the nearest frame count for the same
 rate. An older preset's `custom_freq_hz` converts the same way. Both print the

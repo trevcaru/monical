@@ -363,7 +363,7 @@ The current entry is always displayed in full. The raw `--text` value is recorde
 
 **Stimulus-specific snapshot fields:** `text_string` (the string displayed, in full), `text_preset_index`, `letter_spacing`, `rotation_deg`, `font_family`, `font_requested`, `font_rendered`, `font_fallback`, `alpha`, `r`, `g`, `b`.
 
-**Presets** carry the string index, spacing, family and rotation. The resolved font names are not carried; they belong to the machine. On load `text_index` wraps modulo the current session's cycle length, and the string follows the index. An unknown `mode` falls back to `static_on`. Both print a console line.
+**Presets** carry the displayed string and its index, spacing, family and rotation. The resolved font names are not carried; they belong to the machine. On load the saved **string** is matched against this session's cycle first, because the same index can mean a different string under another `--text`. If the saved index still points at that string, the index is kept, so a duplicate entry stays the one that was saved. If the string is not in the cycle, the index decides, wrapped modulo the cycle length, and a console line names the saved string and the one loaded. An unknown `mode` falls back to `static_on`. Every correction prints a console line.
 
 **Colour defaults to white (1.0) for this type only.** rgb 0.0 is the same mid-gray as the default background, which rendered the glyphs invisible at launch. The uniform patch (§4.4) keeps 0.0, because there mid-gray is the calibration starting point the patch is meant to be driven away from. The default is chosen in `default_state()` from the stimulus type, so state, readout and snapshot never disagree with what is on screen.
 

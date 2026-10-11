@@ -1993,13 +1993,29 @@ def apply_preset(state, loaded, text_presets=None):
             state['mode'], MODE_STATIC_ON))
         state['mode'] = MODE_STATIC_ON
     if text_presets:
-        # The cycle list comes from this session's --text, so an index saved
-        # under another one wraps, and the string follows the index.
-        index = state['text_index'] % len(text_presets)
-        if index != state['text_index']:
-            print("Preset: text_index {} -> {} (wrapped, {} strings in "
-                  "this session's cycle)".format(
-                      state['text_index'], index, len(text_presets)))
+        # The cycle list comes from this session's --text, so the saved
+        # STRING is matched first -- its index can mean another string here.
+        # Only when it is missing does the index (wrapped) decide.
+        saved = loaded.get('text_string')
+        index = state['text_index']
+        if not is_number(index):
+            index = 0
+        index = int(index)
+        if saved in text_presets:
+            if not (0 <= index < len(text_presets)
+                    and text_presets[index] == saved):
+                index = text_presets.index(saved)
+        else:
+            wrapped = index % len(text_presets)
+            if wrapped != index:
+                print("Preset: text_index {} -> {} (wrapped, {} strings in "
+                      "this session's cycle)".format(
+                          index, wrapped, len(text_presets)))
+            index = wrapped
+            if saved is not None:
+                print("Preset: text {!r} is not in this session's cycle; "
+                      "loaded {!r} instead".format(saved,
+                                                   text_presets[index]))
         state['text_index'] = index
         state['text_string'] = text_presets[index]
     if ignored:
