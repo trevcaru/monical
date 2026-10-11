@@ -89,16 +89,16 @@ OUT_STAMP_FMT = '%Y-%m-%d_%H%M%S'
 OUT_NAME_FMT = 'monical_{}.json'
 PRESET_NAME_FMT = 'preset_{}.json'
 SCREENSHOT_NAME_FMT = 'monical_screenshot_{}.png'
-BENCH_NAME_FMT = 'bench_{}.json'
-BENCH_STAMP_FMT = '%Y%m%d_%H%M%S'
+BENCH_NAME_FMT = 'bench_{}.json'   # same stamp as the session files
 
 # --bench (MANUAL "Verifying frame timing on your rig"): every type at each
-# copy count, flicker mode 3, readout off; then one run with it on.
+# copy count with the readout off, then every type at the HUD counts with it
+# on -- what reading the readout during a flicker check costs.
 BENCH_COUNTS = (1, 2, 8, 16)
+BENCH_HUD_COUNTS = (1, 16)
 BENCH_FRAMES = 600
 BENCH_WARMUP = 30                 # frames run, not recorded, per config
-BENCH_HUD_RUN = ('gabor', 16)
-BENCH_BUDGET_WARN = 0.8           # flag draw means above 80% of a frame
+BENCH_BUDGET_WARN = 0.8           # flag p95 or max above 80% of a frame
 
 # State keys that describe the rig or the run rather than the stimulus, and so
 # are not carried in a preset. `aspect` comes from the window, `image_path`
@@ -174,10 +174,10 @@ HUD_WRAP_W = 1.8
 HUD_CHAR_W = 0.514 * HUD_HEIGHT
 HUD_LINE_PITCH = 0.0204
 
-# The readout's timing figures (rolling refresh, sigma, drop count) change on
-# every frame. Re-laying out a TextStim costs more than 1 ms -- a quarter of a
-# 240 Hz frame -- so those figures refresh at most this often, on the clock.
-# Everything else in the readout still appears on the very next frame.
+# The readout's timing figures (rolling refresh, sigma, drop count, all on
+# line 1) change on every frame. Re-laying out text costs real time at 240 Hz,
+# so those figures refresh at most this often, on the clock. Everything else
+# in the readout still appears on the very next frame.
 HUD_TIMING_INTERVAL_S = 0.1
 
 MENU_HEIGHT = 0.021
@@ -1560,6 +1560,62 @@ def set_text(stim, text):
         stim.text = text
 
 
+class HudLines(object):
+    """The readout as one TextStim per line (PRD 8).
+
+    A line re-lays out only when its own string changes, so the 10 Hz timing
+    tick on line 1 costs one short line, not the whole block.
+
+    Each line sits exactly where pyglet put it in the old single multi-line
+    TextStim. A centred multi-line label puts its top at y +
+    content_height // 2 and line i's baseline (i+1) ascents and i descents
+    below that; a one-line label puts its top at y + ascent // 2 -
+    descent // 4 instead. The difference is a whole number of pixels per
+    line, so every line keeps the block's sub-pixel position.
+    """
+
+    def __init__(self, win):
+        self.win = win
+        self.stims = []
+        self.count = 0
+        self._metrics = None
+
+    def _line_metrics(self):
+        """(ascent, descent) in px of the face TextStim's label uses."""
+        if self._metrics is None:
+            import pyglet.font
+            height_px = HUD_HEIGHT * self.win.size[1]
+            face = pyglet.font.load(READOUT_FONT, int(height_px * 0.75))
+            self._metrics = (face.ascent, face.descent)
+        return self._metrics
+
+    def show(self, lines, block_y):
+        """Lay out `lines` as one block centred at height-units y."""
+        while len(self.stims) < len(lines):
+            self.stims.append(visual.TextStim(
+                self.win, text='', font=READOUT_FONT, height=HUD_HEIGHT,
+                color='white', wrapWidth=HUD_WRAP_W, alignText='center',
+                anchorHoriz='center', autoLog=False))
+        ascent, descent = self._line_metrics()
+        pitch = ascent - descent
+        top = (len(lines) * pitch) // 2 - (ascent // 2 - descent // 4)
+        win_h = float(self.win.size[1])
+        for i, (stim, text) in enumerate(zip(self.stims, lines)):
+            set_text(stim, text)
+            pos = (0, block_y + (top - i * pitch) / win_h)
+            if tuple(stim.pos) != pos:
+                stim.pos = pos
+        self.count = len(lines)
+
+    @property
+    def text(self):
+        return '\n'.join(stim.text for stim in self.stims[:self.count])
+
+    def draw(self):
+        for stim in self.stims[:self.count]:
+            stim.draw()
+
+
 def ring_positions(state):
     """Centre of every drawn copy of the stimulus, height units (PRD 6.3).
 
@@ -2574,10 +2630,7 @@ def build_scene(win, state, image, verbose=True):
         lineWidth=2, lineColor=MARKER_COLOR, colorSpace='rgb',
         fillColor=None, interpolate=False, autoLog=False)
 
-    scene.hud = visual.TextStim(
-        win, text='', font=READOUT_FONT, height=HUD_HEIGHT, color='white',
-        pos=(0, HUD_POS_Y), wrapWidth=HUD_WRAP_W, alignText='center',
-        anchorHoriz='center', autoLog=False)
+    scene.hud = HudLines(win)
 
     # PRD 8.2: always drawn, dimmer and smaller than the HUD so the two do
     # not read as one block.
@@ -2720,20 +2773,21 @@ def render_frame(win, scene, state, refresh_hz, resolution, screen_height_cm,
             scene.marker.draw()
 
     if state['hud_visible']:
-        # Timing figures refresh on the clock (HUD_TIMING_INTERVAL_S); the
-        # strings are rebuilt every frame, but set_text re-lays out only when
-        # one differs, so a knob change shows on the next frame.
+        # Timing figures refresh on the clock (HUD_TIMING_INTERVAL_S) and
+        # live on line 1 only. Every line's string is rebuilt each frame, but
+        # a line re-lays out only when it differs, so a knob change shows on
+        # the next frame and a timing tick costs one line.
         shown = scene.hud_timing
         now = scene.hud_clock.getTime()
         if now - shown['at'] >= HUD_TIMING_INTERVAL_S:
             shown.update(at=now, hz=timer.rolling_hz, sd=timer.rolling_sd_ms,
                          drops=timer.dropped)
-        set_text(scene.hud, build_hud(
+        lines = build_hud(
             state, resolution, refresh_hz, shown['hz'], screen_height_cm,
             sd_ms=shown['sd'], drops=shown['drops'], sweep=sweep,
-            out_name=out_name))
-        extra = scene.hud.text.count('\n') - 4
-        scene.hud.pos = (0, HUD_POS_Y + max(0, extra) * HUD_LINE_PITCH / 2.0)
+            out_name=out_name).split('\n')
+        extra = len(lines) - 5
+        scene.hud.show(lines, HUD_POS_Y + max(0, extra) * HUD_LINE_PITCH / 2.0)
         scene.hud.draw()
 
     # Always drawn, whatever [H] says (PRD 8.2).
@@ -2878,8 +2932,13 @@ def bench_config(win, state, image, refresh_hz, resolution,
 
 
 def bench_flagged(result):
-    return (result['dropped_frames'] > 0 or
-            result['draw_mean_ms'] > BENCH_BUDGET_WARN * result['budget_ms'])
+    """Dropped frames, or a draw p95 or max above 80% of the budget.
+
+    The mean hides the frames that matter: one slow frame drops one cycle.
+    """
+    limit = BENCH_BUDGET_WARN * result['budget_ms']
+    return (result['dropped_frames'] > 0 or result['draw_p95_ms'] > limit or
+            result['draw_max_ms'] > limit)
 
 
 def bench_table(results):
@@ -2912,7 +2971,7 @@ def run_bench(args):
     image, image_label = resolve_image(args.image)
     started = datetime.datetime.now()
     out_path = unique_path(os.path.join(
-        OUT_DIR, BENCH_NAME_FMT.format(started.strftime(BENCH_STAMP_FMT))))
+        OUT_DIR, BENCH_NAME_FMT.format(timestamp_slug(started))))
     mon = monitors.Monitor(MONITOR_NAME)
     win = visual.Window(
         size=REQUESTED_RESOLUTION, fullscr=True, screen=SCREEN_INDEX,
@@ -2937,15 +2996,15 @@ def run_bench(args):
                   frame_budget_ms=round(1000.0 / refresh_hz, 3),
                   texture=image_label)
     payload = dict(header, aborted=False, results=[])
-    configs = [(t, n, False) for t in STIMULUS_TYPES for n in BENCH_COUNTS]
-    configs.append(BENCH_HUD_RUN + (True,))
+    configs = ([(t, n, False) for t in STIMULUS_TYPES for n in BENCH_COUNTS] +
+               [(t, n, True) for t in STIMULUS_TYPES for n in BENCH_HUD_COUNTS])
     print("Benchmark: {} configurations x {} frames at {:.2f} Hz "
           "(budget {:.2f} ms). Q or ESC aborts.".format(
               len(configs), BENCH_FRAMES, refresh_hz, 1000.0 / refresh_hz))
 
     for stimulus_type, count, hud in configs:
         if stimulus_type == STIM_RADIAL and not HAS_RADIAL:
-            if count == BENCH_COUNTS[0]:
+            if count == BENCH_COUNTS[0] and not hud:
                 payload['results'].append({
                     'stimulus_type': stimulus_type,
                     'skipped': 'psychopy_visionscience missing ({})'.format(
@@ -2974,8 +3033,8 @@ def run_bench(args):
     win.close()
     print("")
     print(bench_table(payload['results']))
-    print("! = dropped frames, or draw mean above {:.0f}% of the {:.2f} ms "
-          "frame budget.".format(100 * BENCH_BUDGET_WARN,
+    print("! = dropped frames, or draw p95 or max above {:.0f}% of the "
+          "{:.2f} ms frame budget.".format(100 * BENCH_BUDGET_WARN,
                                  1000.0 / refresh_hz))
     if payload['aborted']:
         print("ABORTED -- partial results.")
@@ -3010,9 +3069,10 @@ def parse_args(argv=None):
     parser.add_argument(
         '--bench', action='store_true',
         help='Benchmark frame timing instead of running a session: every '
-             'stimulus type at 1, 2, 8 and 16 copies, flicker mode 3, '
-             'fullscreen, 600 frames each. Writes bench_YYYYMMDD_HHMMSS.json '
-             'and prints a table. Q or ESC aborts.')
+             'stimulus type at 1, 2, 8 and 16 copies with the readout off, '
+             'and at 1 and 16 with it on, flicker mode 3, fullscreen, 600 '
+             'frames each. Writes bench_YYYY-MM-DD_HHMMSS.json and prints a '
+             'table. Q or ESC aborts.')
     parser.add_argument(
         '--preset', metavar='PATH', default=None,
         help='Preset JSON saved with [P]. Restores the knobs and preselects '

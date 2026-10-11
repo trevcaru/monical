@@ -512,12 +512,13 @@ run the experiment, before relying on any flicker measurement there:
 python monical.py --bench
 ```
 
-It needs no input and takes about 25 configurations × 10 s at 60 Hz, less at
+It needs no input and takes about 36 configurations × 10 s at 60 Hz, less at
 higher refresh rates. `Q` or `ESC` stops it early and keeps what finished. It
 runs every stimulus type at 1, 2, 8 and 16 copies in flicker mode `3` with the
-readout off, then 16 Gabor copies with the readout on, 600 frames each.
+readout off, then every type at 1 and 16 copies with the readout on, 600
+frames each.
 
-At the end it prints a table and writes `bench_YYYYMMDD_HHMMSS.json` beside
+At the end it prints a table and writes `bench_YYYY-MM-DD_HHMMSS.json` beside
 the script:
 
 | Column | Meaning |
@@ -526,16 +527,22 @@ the script:
 | `intv ms` / `intv max` | flip-to-flip interval: mean (should be 1000 / refresh), worst |
 | `drops` | frames whose interval ran past 1.5× the rolling median |
 | `%bud` | mean draw time as a share of one frame (4.17 ms at 240 Hz) |
-| `!` | dropped frames, or a draw mean above 80% of the frame |
+| `!` | dropped frames, or a draw p95 or max above 80% of the frame |
 
 **Any dropped frames at a given copy count mean flicker verification on that
 machine is unreliable at that N.** A dropped frame stretches one cycle, which
 is exactly the error an oscilloscope check is meant to catch, so it would read
 as a display fault. Reduce the copy count, or fix the machine (power plan,
 background load, driver vsync settings), and re-run until the row is clean.
-A draw mean above 80% leaves no headroom: it may pass the benchmark and still
-drop under real conditions. The readout-on row shows what the readout costs
-on that machine; hide it with `H` while measuring if that row is marked.
+A p95 or max above 80% leaves no headroom: it may pass the benchmark and
+still drop under real conditions.
+
+**The readout-on rows** (`hud on`) show the cost of reading the readout
+during a flicker check. Its timing figures refresh ten times a second, and
+each refresh re-lays out a line of text. **If a readout-on row drops frames
+or is marked, hide the readout with `H` while scoping**, and read the values
+between measurements. `H` hides only the text; the stimulus and its timing
+are untouched.
 
 ## 6. Output file
 
